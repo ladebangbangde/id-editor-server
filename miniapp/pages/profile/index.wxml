@@ -1,0 +1,6 @@
+<view class="container">
+  <view class="card">
+    <view class="section-title">我的页面</view>
+    <view>这里预留登录信息、历史订单、下载记录。</view>
+  </view>
+</view>

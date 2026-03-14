@@ -1,0 +1,12 @@
+<view class="container">
+  <view class="card">
+    <view class="section-title">订单信息</view>
+    <view>图片ID：{{imageId}}</view>
+    <view>支付金额：￥{{displayPrice}}</view>
+    <view>状态：{{statusText}}</view>
+  </view>
+
+  <button class="primary-btn" bindtap="createOrder" loading="{{loading}}">创建订单并支付（Mock）</button>
+
+  <button wx:if="{{paid}}" bindtap="downloadHd" style="margin-top: 16rpx;">下载高清图</button>
+</view>

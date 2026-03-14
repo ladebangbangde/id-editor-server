@@ -1,0 +1,8 @@
+node_modules/
+server/node_modules/
+server/.env
+.DS_Store
+server/storage/uploads/*
+server/storage/processed/*
+!server/storage/uploads/.gitkeep
+!server/storage/processed/.gitkeep
