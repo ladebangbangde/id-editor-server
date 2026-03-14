@@ -1,0 +1,9 @@
+<view class="container">
+  <view class="card">
+    <view class="section-title">证件照预览</view>
+    <image class="result" src="{{previewUrl}}" mode="aspectFit"></image>
+    <text class="hint">注：当前为预览图，高清图下载需支付</text>
+  </view>
+
+  <button class="primary-btn" bindtap="goOrder">下载高清图（￥{{displayPrice}}）</button>
+</view>

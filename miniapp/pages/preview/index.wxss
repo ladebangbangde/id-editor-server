@@ -1,0 +1,13 @@
+.result {
+  width: 100%;
+  height: 560rpx;
+  border-radius: 16rpx;
+  background: #f3f4f6;
+}
+
+.hint {
+  display: block;
+  color: #6b7280;
+  font-size: 24rpx;
+  margin-top: 12rpx;
+}
