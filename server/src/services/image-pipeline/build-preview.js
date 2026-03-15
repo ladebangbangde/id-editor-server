@@ -1,0 +1,1 @@
+const sharp=require('sharp'); module.exports=async (hdPath, previewPath)=>{ await sharp(hdPath).resize({width:600,withoutEnlargement:true}).jpeg({quality:80}).toFile(previewPath); return previewPath; };

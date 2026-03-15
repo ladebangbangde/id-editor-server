@@ -1,0 +1,1 @@
+const sharp=require('sharp'); module.exports={ async enhance(inputPath, outputPath){ await sharp(inputPath).sharpen().jpeg({quality:98}).toFile(outputPath); return {outputPath,message:'Basic sharpen enhancement applied'}; } };

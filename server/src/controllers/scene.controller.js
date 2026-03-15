@@ -1,0 +1,1 @@
+const sceneService=require('../services/scene.service'); const { success }=require('../utils/api-response'); module.exports={ async list(req,res){ success(res, await sceneService.list()); }, async detail(req,res){ success(res, await sceneService.detail(req.params.sceneKey)); } };

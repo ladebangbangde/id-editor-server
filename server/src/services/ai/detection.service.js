@@ -1,0 +1,1 @@
+module.exports = { async detect() { return { hasFace: true, faceCount: 1, faceBox: { x: 100, y: 80, width: 320, height: 420 }, poseValid: true, blurScore: 0.1, occlusionDetected: false, message: 'Mock detection passed' }; } };
