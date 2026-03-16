@@ -103,11 +103,43 @@ cp id-editor-server/.env.example id-editor-server/.env
 - `DB_NAME`
 - `DB_USER`
 - `DB_PASSWORD`
+- `DB_DIALECT`（默认 mysql）
+- `DB_TIMEZONE`（默认 +08:00）
+- `DB_URL`（可选，单连接串，优先于分散字段）
+- `DB_CONFIG_JSON`（可选，JSON 字符串注入）
+- `DB_CONFIG_FILE`（可选，JSON 文件路径，适合挂载外部配置）
 - `AI_SERVICE_BASE_URL=http://id-editor-tool:8000`
 - `UPLOAD_BASE_DIR=/app/uploads`
 - `LOG_LEVEL=info`
 - `JWT_SECRET=replace_with_secure_value`
 - `ORDER_CURRENCY=CNY`
+
+
+### 数据库连接配置优先级（支持外部注入）
+
+id-editor-server 的数据库配置按以下顺序覆盖（后者优先级更高）：
+
+1. 基础环境变量：`DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD`
+2. 配置文件：`DB_CONFIG_FILE` 指向的 JSON 文件（建议通过 Docker volume 挂载）
+3. JSON 字符串：`DB_CONFIG_JSON`
+
+另外：
+
+- 如果提供 `DB_URL`（或在 JSON 中提供 `uri`），将优先使用连接串模式。
+- `DB_CONFIG_FILE` / `DB_CONFIG_JSON` 可携带 `options` 字段，透传 Sequelize 连接参数。
+
+`db.config.json` 示例：
+
+```json
+{
+  "uri": "mysql://root:123456@host.docker.internal:3306/ai_id_photo",
+  "options": {
+    "dialect": "mysql",
+    "timezone": "+08:00",
+    "logging": false
+  }
+}
+```
 
 ## 6. DB_HOST 配置说明（Linux / Mac / Windows）
 
