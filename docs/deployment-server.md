@@ -158,6 +158,8 @@ docker compose down
 
 ## 8. 健康检查约定
 
+接口详细说明见：`docs/api-reference.md`。
+
 `id-editor-server` 约定提供：
 
 - `GET /health`
@@ -166,11 +168,7 @@ docker compose down
 
 ```json
 {
-  "success": true,
-  "message": "server is running",
-  "data": {
-    "service": "id-editor-server"
-  }
+  "status": "ok"
 }
 ```
 
