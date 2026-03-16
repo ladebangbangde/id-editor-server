@@ -2,10 +2,10 @@ services:
   id-editor-server:
     build:
       context: ./server
-      dockerfile: server/Dockerfile
+      dockerfile: ../id-editor-server/Dockerfile
     container_name: id-editor-server
     env_file:
-      - ./id-editor-server/.env
+      - ./server/.env.example
     ports:
       - "3000:3000"
     volumes:
