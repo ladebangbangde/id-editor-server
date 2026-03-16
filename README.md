@@ -1,156 +1,72 @@
-# 微信小程序 AI 证件照制作项目（MVP）
+# AI 证件照项目（Backend Repo）
 
-这是一个可本地运行的微信小程序 + Node.js 后端的完整 MVP 骨架，用于上传自拍并生成证件照预览图。
+这个仓库现在**以后端为主**（`server/`），用于给微信小程序 / Web UI 提供 API 能力。
 
-## 目录结构
+你提到的独立 UI 仓库：
+- `id-editor-ui`: https://github.com/ladebangbangde/id-editor-ui
 
-```text
-.
-├── miniapp/                         # 微信小程序前端
-│   ├── app.js
-│   ├── app.json
-│   ├── app.wxss
-│   ├── project.config.json
-│   ├── sitemap.json
-│   ├── utils/
-│   │   └── request.js
-│   └── pages/
-│       ├── home/
-│       │   ├── index.js
-│       │   ├── index.json
-│       │   ├── index.wxml
-│       │   └── index.wxss
-│       ├── preview/
-│       │   ├── index.js
-│       │   ├── index.json
-│       │   ├── index.wxml
-│       │   └── index.wxss
-│       ├── order/
-│       │   ├── index.js
-│       │   ├── index.json
-│       │   ├── index.wxml
-│       │   └── index.wxss
-│       └── profile/
-│           ├── index.js
-│           ├── index.json
-│           ├── index.wxml
-│           └── index.wxss
-├── server/                          # Node.js + Express 后端
-│   ├── src/
-│   │   ├── app.js
-│   │   ├── server.js
-│   │   ├── config/
-│   │   │   ├── env.js
-│   │   │   └── logger.js
-│   │   ├── constants/
-│   │   │   └── idPhotoSpecs.js
-│   │   ├── db/
-│   │   │   ├── knex.js
-│   │   │   └── migrations/
-│   │   │       └── 202603130001_init_tables.js
-│   │   ├── middlewares/
-│   │   │   ├── errorHandler.js
-│   │   │   └── notFoundHandler.js
-│   │   ├── modules/
-│   │   │   └── imageProcessor.js
-│   │   ├── routes/
-│   │   │   ├── index.js
-│   │   │   ├── upload.routes.js
-│   │   │   ├── image.routes.js
-│   │   │   └── order.routes.js
-│   │   ├── services/
-│   │   │   ├── image.service.js
-│   │   │   └── order.service.js
-│   │   └── utils/
-│   │       ├── apiResponse.js
-│   │       └── asyncHandler.js
-│   ├── storage/
-│   │   ├── uploads/
-│   │   └── processed/
-│   ├── scripts/
-│   │   └── init.sql
-│   ├── .env.example
-│   ├── knexfile.js
-│   └── package.json
-└── .gitignore
-```
+## 是否还需要 `miniapp` 目录？
 
-## 1. 后端运行（server）
+结论：**不是必须**。推荐按下面策略：
 
-### 环境准备
+- 如果你已经决定前后端分仓（后端在本仓库，前端在 `id-editor-ui`），可以删除本仓库里的 `miniapp/`，减少维护成本。
+- 如果你还希望保留“本地联调样例”或“备用 Demo”，可以暂时保留 `miniapp/`，但建议标注为 `legacy` 或 `example`，避免与主 UI 仓库重复维护。
 
-- Node.js 18+
-- MySQL 8+
+## 当前建议的仓库职责
 
-### 配置
+- 本仓库（`id-editor`）：
+  - 后端 API
+  - 数据库模型与 SQL
+  - AI 图像处理流水线（mock + sharp）
+  - 订单/支付状态/下载权限
+- UI 仓库（`id-editor-ui`）：
+  - 页面与交互
+  - 场景选择、上传、下单、历史展示
+  - 与后端 API 对接
+
+## 后端启动（server）
+
+### 1) 配置环境变量
 
 ```bash
 cd server
 cp .env.example .env
 ```
 
-按需修改 `.env` 中的数据库连接。
-
-### 安装依赖
+### 2) 安装依赖
 
 ```bash
 npm install
 ```
 
-### 初始化数据库
-
-你可以二选一：
-
-1) 使用 SQL 脚本：
+### 3) 初始化数据库
 
 ```bash
-mysql -u root -p < scripts/init.sql
+mysql -u root -p < sql/init.sql
 ```
 
-2) 使用 Knex Migration：
-
-```bash
-npm run migrate
-```
-
-### 启动服务
+### 4) 启动服务
 
 ```bash
 npm run dev
 ```
 
-服务默认地址：`http://localhost:3000`
-静态文件访问前缀：`/static`
+默认地址：`http://localhost:3000`
 
-## 2. 小程序运行（miniapp）
+## 核心 API（v1）
 
-1. 打开微信开发者工具。
-2. 导入 `miniapp` 目录。
-3. 在 `miniapp/utils/request.js` 中确认 `BASE_URL`（默认 `http://127.0.0.1:3000`）。
-4. 在开发者工具中勾选“不校验合法域名、web-view（业务域名）、TLS 版本以及 HTTPS 证书”。
-5. 运行并测试上传、生成预览、创建订单流程。
-
-## 3. API 概览
-
-- `POST /api/upload` 上传原图
-- `POST /api/images/:imageId/generate` 根据背景色+尺寸生成预览
-- `GET /api/images/:imageId` 查询图片记录
-- `POST /api/orders` 创建订单（支付 mock）
-- `GET /api/orders/:orderId` 查询订单
-
-统一返回格式：
-
-```json
-{
-  "code": 0,
-  "message": "ok",
-  "data": {}
-}
-```
-
-## 4. 后续扩展建议
-
-- 将 `modules/imageProcessor.js` 中 mock 逻辑替换为真实 AI 分割服务。
-- 接入微信支付：在 `order.routes.js` 添加预下单/回调验签。
-- 增加用户鉴权（微信登录态 + JWT）。
-- 增加 CDN + 对象存储（COS/OSS/S3）管理图片。
+- `GET /api/scenes`
+- `GET /api/scenes/:sceneKey`
+- `GET /api/auth/me`
+- `POST /api/upload`
+- `POST /api/images/generate`
+- `GET /api/tasks/:taskId`
+- `GET /api/images/history`
+- `GET /api/images/:imageId/detail`
+- `POST /api/orders`
+- `GET /api/orders/:orderId`
+- `POST /api/orders/:orderId/mock-pay`
+- `GET /api/download/:resultId/preview`
+- `GET /api/download/:resultId/hd`
+- `GET /api/download/:resultId/print`
+- `GET /api/admin/stats`

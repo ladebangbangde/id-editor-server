@@ -1,7 +1,1 @@
-const app = require('./app');
-const env = require('./config/env');
-const logger = require('./config/logger');
-
-app.listen(env.port, () => {
-  logger.info('Server started', { port: env.port, env: env.nodeEnv });
-});
+require('dotenv').config(); const app=require('./app'); const appConfig=require('./config/app.config'); const { sequelize }=require('./models'); const start=async()=>{ await sequelize.authenticate(); app.listen(appConfig.port,()=>console.log(`Server running at ${appConfig.port}`)); }; start();

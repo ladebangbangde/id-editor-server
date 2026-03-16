@@ -1,0 +1,1 @@
+const taskService=require('../services/task.service'); const { success }=require('../utils/api-response'); module.exports={ async detail(req,res){ success(res, await taskService.getTask(req.params.taskId)); } };

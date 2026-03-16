@@ -1,0 +1,1 @@
+const r=require('express').Router(); const c=require('../controllers/download.controller'); r.get('/:resultId/preview',c.preview); r.get('/:resultId/hd',c.hd); r.get('/:resultId/print',c.print); module.exports=r;

@@ -1,0 +1,1 @@
+const uploadService=require('../services/upload.service'); const { success }=require('../utils/api-response'); module.exports={ async upload(req,res){ const { image, meta }=await uploadService.createImageRecord(req.file, req.user.id); success(res,{ imageId:image.id, originalUrl:image.original_url, imageMeta:meta }); } };

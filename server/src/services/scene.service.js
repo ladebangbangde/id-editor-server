@@ -1,0 +1,1 @@
+const { SceneTemplate } = require('../models'); module.exports={ list:()=>SceneTemplate.findAll({where:{is_active:true},order:[['sort_order','ASC']]}), detail:(sceneKey)=>SceneTemplate.findOne({where:{scene_key:sceneKey,is_active:true}}) };

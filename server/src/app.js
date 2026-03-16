@@ -1,20 +1,26 @@
-const path = require('path');
+require('dotenv').config();
 const express = require('express');
+const path = require('path');
+const cors = require('cors');
 const morgan = require('morgan');
-const routes = require('./routes');
-const notFoundHandler = require('./middlewares/notFoundHandler');
-const errorHandler = require('./middlewares/errorHandler');
-
+const appConfig = require('./config/app.config');
+const { ensureUploadDirs } = require('./utils/file-helper');
+const auth = require('./middlewares/auth.middleware');
+const errorHandler = require('./middlewares/error.middleware');
 const app = express();
-
-app.use(morgan('dev'));
+ensureUploadDirs();
+app.use(cors());
+app.use(morgan('combined'));
 app.use(express.json({ limit: '2mb' }));
-app.use(express.urlencoded({ extended: true }));
-
-app.use('/static', express.static(path.resolve(process.cwd(), 'storage')));
-app.use('/api', routes);
-
-app.use(notFoundHandler);
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+app.use(appConfig.apiPrefix, auth);
+app.use(`${appConfig.apiPrefix}/auth`, require('./routes/auth.routes'));
+app.use(`${appConfig.apiPrefix}/scenes`, require('./routes/scene.routes'));
+app.use(`${appConfig.apiPrefix}/upload`, require('./routes/upload.routes'));
+app.use(`${appConfig.apiPrefix}/images`, require('./routes/image.routes'));
+app.use(`${appConfig.apiPrefix}/tasks`, require('./routes/task.routes'));
+app.use(`${appConfig.apiPrefix}/orders`, require('./routes/order.routes'));
+app.use(`${appConfig.apiPrefix}/download`, require('./routes/download.routes'));
+app.use(`${appConfig.apiPrefix}/admin`, require('./routes/admin.routes'));
 app.use(errorHandler);
-
 module.exports = app;

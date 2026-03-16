@@ -1,0 +1,1 @@
+const cron=require('node-cron'); const fs=require('fs'); const path=require('path'); const appConfig=require('../config/app.config'); cron.schedule('0 3 * * *',()=>{ const tempDir=path.join(appConfig.uploadDir,'temp'); if(!fs.existsSync(tempDir)) return; for(const f of fs.readdirSync(tempDir)){ fs.unlinkSync(path.join(tempDir,f)); } });
