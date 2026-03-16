@@ -5,7 +5,7 @@ services:
       dockerfile: ../id-editor-server/Dockerfile
     container_name: id-editor-server
     env_file:
-      - ./server/.env.example
+      - server/.env
     ports:
       - "3000:3000"
     volumes:

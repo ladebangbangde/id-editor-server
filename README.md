@@ -30,7 +30,7 @@
 
 ```bash
 cd server
-cp .env.example .env
+cp .env .env
 ```
 
 ### 2) 安装依赖

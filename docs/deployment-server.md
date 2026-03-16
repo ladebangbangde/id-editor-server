@@ -91,7 +91,7 @@ uploads 目录职责：
 复制模板并填写真实值：
 
 ```bash
-cp id-editor-server/.env.example id-editor-server/.env
+cp id-editor-server/.env id-editor-server/.env
 ```
 
 核心变量如下：
