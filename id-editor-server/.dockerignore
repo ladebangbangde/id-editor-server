@@ -17,7 +17,7 @@ dist
 .tmp
 tmp
 
-Dockerfile*
+../server/Dockerfile
 docker-compose*.yml
 
 README.md

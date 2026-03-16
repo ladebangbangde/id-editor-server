@@ -2,7 +2,7 @@ services:
   id-editor-server:
     build:
       context: ./server
-      dockerfile: ../id-editor-server/Dockerfile
+      dockerfile: server/Dockerfile
     container_name: id-editor-server
     env_file:
       - ./id-editor-server/.env
