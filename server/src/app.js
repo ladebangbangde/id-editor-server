@@ -16,6 +16,8 @@ app.get('/health', (_req, res) => res.status(200).json({ status: 'ok' }));
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 app.use(appConfig.apiPrefix, auth);
 app.use(`${appConfig.apiPrefix}/auth`, require('./routes/auth.routes'));
+app.use(`${appConfig.apiPrefix}/home`, require('./routes/home.routes'));
+app.use(`${appConfig.apiPrefix}/spec`, require('./routes/spec.routes'));
 app.use(`${appConfig.apiPrefix}/scenes`, require('./routes/scene.routes'));
 app.use(`${appConfig.apiPrefix}/upload`, require('./routes/upload.routes'));
 app.use(`${appConfig.apiPrefix}/images`, require('./routes/image.routes'));
