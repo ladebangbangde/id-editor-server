@@ -1,3 +1,5 @@
+const { SpecTemplate } = require('../models');
+
 const HOME_CONFIG = {
   mainCards: [
     {
@@ -43,8 +45,74 @@ const HOME_CONFIG = {
   ]
 };
 
+const HOME_TEMPLATE_TABS = [
+  { key: 'popular', label: '热门尺寸', categoryKey: 'hot' },
+  { key: 'general', label: '通用寸照', categoryKey: 'common' },
+  { key: 'medical', label: '医药卫生', categoryKey: 'medical' },
+  { key: 'language', label: '语言考试', categoryKey: 'language' },
+  { key: 'civil', label: '公务考试', categoryKey: 'civil' },
+  { key: 'degree', label: '学历考试', categoryKey: 'education' },
+  { key: 'career', label: '职业资格', categoryKey: 'job' },
+  { key: 'passport', label: '签证护照', categoryKey: 'passport' },
+  { key: 'police', label: '公安证件', categoryKey: 'police' },
+  { key: 'social', label: '社保民政', categoryKey: 'social' }
+];
+
+const normalizeArray = (value) => {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (!value) {
+    return [];
+  }
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  return [];
+};
+
+const toHomeTemplateDto = (template) => ({
+  sceneKey: template.scene_key,
+  name: template.name,
+  pixelWidth: Number(template.pixel_width),
+  pixelHeight: Number(template.pixel_height),
+  hot: Boolean(template.is_hot),
+  tip: template.tip || template.scene,
+  tags: normalizeArray(template.tags)
+});
+
 module.exports = {
   config() {
     return HOME_CONFIG;
+  },
+
+  async templates(category = 'popular') {
+    const matchedTab = HOME_TEMPLATE_TABS.find((tab) => tab.key === category);
+    const templates = matchedTab
+      ? await SpecTemplate.findAll({
+          where: {
+            category_key: matchedTab.categoryKey,
+            is_active: true
+          },
+          order: [
+            ['is_hot', 'DESC'],
+            ['sort', 'ASC'],
+            ['id', 'ASC']
+          ]
+        })
+      : [];
+
+    return {
+      tabs: HOME_TEMPLATE_TABS.map(({ key, label }) => ({ key, label })),
+      templates: templates.map(toHomeTemplateDto)
+    };
   }
 };

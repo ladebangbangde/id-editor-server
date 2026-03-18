@@ -3,6 +3,7 @@
 Base URL: `/api`
 
 - GET `/home/config`
+- GET `/home/templates?category=popular`
 - GET `/spec/categories`
 - GET `/spec/list?category=hot&page=1&pageSize=20`
 - GET `/spec/detail/:id`

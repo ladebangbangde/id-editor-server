@@ -6,8 +6,10 @@ module.exports = sequelize.define(
   {
     id: { type: DataTypes.STRING(64), primaryKey: true },
     category_key: { type: DataTypes.STRING(64), allowNull: false },
+    scene_key: { type: DataTypes.STRING(64), allowNull: false },
     name: { type: DataTypes.STRING(64), allowNull: false },
     scene: { type: DataTypes.STRING(128), allowNull: false },
+    tip: { type: DataTypes.STRING(255), allowNull: true },
     pixel_width: { type: DataTypes.INTEGER, allowNull: false },
     pixel_height: { type: DataTypes.INTEGER, allowNull: false },
     pixel_text: { type: DataTypes.STRING(32), allowNull: false },

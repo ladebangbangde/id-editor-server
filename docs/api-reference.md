@@ -7,8 +7,8 @@
 - **基础地址（示例）**：`http://127.0.0.1:30000`
 - **API 前缀**：`/api`
 - **响应结构**：
-  - 成功：`{ "success": true, "code": 0, "message": "OK|ok", "data": ... }`
-  - 失败：`{ "success": false, "code": 400|404|500, "message": "错误信息", "data": ... }`
+  - 成功：`{ "success": true, "message": "OK|ok", "data": ... }`
+  - 失败：`{ "success": false, "message": "错误信息", "data": ... }`
 
 ## 2. 认证与权限
 
@@ -21,6 +21,12 @@
 - **用途**：获取首页主卡片和快捷入口配置。
 - **返回字段**：`mainCards`、`quickEntries`
 - **配置方式**：当前在 `home.service` 中以内置常量维护，便于后续改为配置表。
+
+### GET `/api/home/templates?category=popular`
+- **用途**：获取微信小程序首页模板 tabs 与当前分类模板卡片。
+- **分类 key**：`popular`、`general`、`medical`、`language`、`civil`、`degree`、`career`、`passport`、`police`、`social`。
+- **返回字段**：`tabs`、`templates`；模板项包含 `sceneKey`、`name`、`pixelWidth`、`pixelHeight`、`hot`、`tip`、`tags`。
+- **兼容说明**：`sceneKey` 对应真实 `scene_templates.scene_key`，可直接用于现有制作流程。
 
 ## 4. 规格模板模块
 

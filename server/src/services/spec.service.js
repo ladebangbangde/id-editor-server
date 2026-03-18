@@ -31,8 +31,10 @@ const normalizeArray = (value) => {
 const toTemplateDto = (template) => ({
   id: template.id,
   category: template.category_key,
+  sceneKey: template.scene_key,
   name: template.name,
   scene: template.scene,
+  tip: template.tip || template.scene,
   pixel: template.pixel_text,
   pixelWidth: Number(template.pixel_width),
   pixelHeight: Number(template.pixel_height),
