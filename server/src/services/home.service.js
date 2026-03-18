@@ -1,4 +1,10 @@
 const { SpecTemplate } = require('../models');
+const {
+  getHomeTabs,
+  getHomeTab,
+  getSpecTemplatesByCategory,
+  toHomeTemplate
+} = require('../constants/spec-data');
 
 const HOME_CONFIG = {
   mainCards: [
@@ -45,19 +51,6 @@ const HOME_CONFIG = {
   ]
 };
 
-const HOME_TEMPLATE_TABS = [
-  { key: 'popular', label: '热门尺寸', categoryKey: 'hot' },
-  { key: 'general', label: '通用寸照', categoryKey: 'common' },
-  { key: 'medical', label: '医药卫生', categoryKey: 'medical' },
-  { key: 'language', label: '语言考试', categoryKey: 'language' },
-  { key: 'civil', label: '公务考试', categoryKey: 'civil' },
-  { key: 'degree', label: '学历考试', categoryKey: 'education' },
-  { key: 'career', label: '职业资格', categoryKey: 'job' },
-  { key: 'passport', label: '签证护照', categoryKey: 'passport' },
-  { key: 'police', label: '公安证件', categoryKey: 'police' },
-  { key: 'social', label: '社保民政', categoryKey: 'social' }
-];
-
 const normalizeArray = (value) => {
   if (Array.isArray(value)) {
     return value;
@@ -79,6 +72,9 @@ const normalizeArray = (value) => {
   return [];
 };
 
+const isMissingSpecTableError = (error) =>
+  error && error.name === 'SequelizeDatabaseError' && error.parent && error.parent.code === 'ER_NO_SUCH_TABLE';
+
 const toHomeTemplateDto = (template) => ({
   sceneKey: template.scene_key,
   name: template.name,
@@ -95,24 +91,40 @@ module.exports = {
   },
 
   async templates(category = 'popular') {
-    const matchedTab = HOME_TEMPLATE_TABS.find((tab) => tab.key === category);
-    const templates = matchedTab
-      ? await SpecTemplate.findAll({
-          where: {
-            category_key: matchedTab.categoryKey,
-            is_active: true
-          },
-          order: [
-            ['is_hot', 'DESC'],
-            ['sort', 'ASC'],
-            ['id', 'ASC']
-          ]
-        })
-      : [];
+    const matchedTab = getHomeTab(category);
+    if (!matchedTab) {
+      return {
+        tabs: getHomeTabs(),
+        templates: []
+      };
+    }
 
-    return {
-      tabs: HOME_TEMPLATE_TABS.map(({ key, label }) => ({ key, label })),
-      templates: templates.map(toHomeTemplateDto)
-    };
+    try {
+      const templates = await SpecTemplate.findAll({
+        where: {
+          category_key: matchedTab.specCategoryKey,
+          is_active: true
+        },
+        order: [
+          ['is_hot', 'DESC'],
+          ['sort', 'ASC'],
+          ['id', 'ASC']
+        ]
+      });
+
+      return {
+        tabs: getHomeTabs(),
+        templates: templates.map(toHomeTemplateDto)
+      };
+    } catch (error) {
+      if (!isMissingSpecTableError(error)) {
+        throw error;
+      }
+
+      return {
+        tabs: getHomeTabs(),
+        templates: getSpecTemplatesByCategory(matchedTab.specCategoryKey).map(toHomeTemplate)
+      };
+    }
   }
 };
