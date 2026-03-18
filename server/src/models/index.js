@@ -1,6 +1,8 @@
 const sequelize = require('../config/db');
 const User = require('./user.model');
 const SceneTemplate = require('./scene-template.model');
+const SpecCategory = require('./spec-category.model');
+const SpecTemplate = require('./spec-template.model');
 const Image = require('./image.model');
 const ImageTask = require('./image-task.model');
 const ImageResult = require('./image-result.model');
@@ -20,4 +22,4 @@ Order.belongsTo(User, { foreignKey: 'user_id' });
 Order.belongsTo(Image, { foreignKey: 'image_id' });
 Order.belongsTo(ImageResult, { foreignKey: 'result_id' });
 PaymentRecord.belongsTo(Order, { foreignKey: 'order_id' });
-module.exports = { sequelize, User, SceneTemplate, Image, ImageTask, ImageResult, Order, PaymentRecord, DownloadRecord, AdminUser };
+module.exports = { sequelize, User, SceneTemplate, SpecCategory, SpecTemplate, Image, ImageTask, ImageResult, Order, PaymentRecord, DownloadRecord, AdminUser };

@@ -2,6 +2,10 @@
 
 Base URL: `/api`
 
+- GET `/home/config`
+- GET `/spec/categories`
+- GET `/spec/list?category=hot&page=1&pageSize=20`
+- GET `/spec/detail/:id`
 - GET `/scenes`
 - GET `/scenes/:sceneKey`
 - GET `/auth/me`
