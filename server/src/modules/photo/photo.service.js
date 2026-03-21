@@ -4,9 +4,17 @@ const AppError = require('../../utils/app-error');
 const appConfig = require('../../config/app.config');
 const logger = require('../../utils/logger');
 const idEditorToolClient = require('../../integrations/id-editor-tool/id-editor-tool.client');
-const { mapToolErrorToBusiness, buildQualitySummary } = require('../../integrations/id-editor-tool/id-editor-tool.mapper');
+const {
+  mapToolErrorToBusiness,
+  mapToolDetectResult,
+  mapToolGenerateResult,
+  mapToolSpecs,
+  buildQualitySummary,
+  buildGeneratePhotoPayload
+} = require('../../integrations/id-editor-tool/id-editor-tool.mapper');
 const photoRepository = require('./photo.repository');
-const { getPhotoSpecs, validateProcessPhotoPayload } = require('./dto/process-photo.dto');
+const { getPhotoSpecs, mergeSpecs, validateProcessPhotoPayload } = require('./dto/process-photo.dto');
+const { toToolSharedAbsolutePath } = require('../../utils/file-helper');
 
 function buildAbsoluteUrl(urlPath) {
   if (!urlPath) return null;
@@ -14,9 +22,9 @@ function buildAbsoluteUrl(urlPath) {
   return new URL(urlPath.startsWith('/') ? urlPath : `/${urlPath}`, `${appConfig.baseUrl}/`).toString();
 }
 
-function normalizeWarnings(warnings) {
-  if (Array.isArray(warnings)) return warnings.filter(Boolean);
-  return [];
+function buildToolFilePath(filePath) {
+  if (!filePath) return null;
+  return toToolSharedAbsolutePath(filePath);
 }
 
 function serializeToolError(error) {
@@ -29,13 +37,60 @@ function serializeToolError(error) {
   };
 }
 
+function normalizeTaskWarnings(warnings) {
+  return Array.isArray(warnings) ? warnings.filter(Boolean) : [];
+}
+
+function assertDetectResult(detectResult) {
+  if (detectResult.hasFace === false) {
+    throw new AppError('未检测到有效人像', 400, null, 1004);
+  }
+
+  if (typeof detectResult.faceCount === 'number' && detectResult.faceCount > 1) {
+    throw new AppError('检测到多个人像', 400, null, 1005);
+  }
+}
+
+async function loadRuntimeSpecs() {
+  const fallbackSpecs = getPhotoSpecs();
+
+  try {
+    const [colorsResponse, photoSizesResponse] = await Promise.all([
+      idEditorToolClient.getAvailableColors(),
+      idEditorToolClient.getPhotoSizes()
+    ]);
+
+    return mergeSpecs(mapToolSpecs({
+      colorsResponse,
+      photoSizesResponse,
+      fallbackSpecs
+    }));
+  } catch (error) {
+    logger.warn('photo specs fallback to static defaults', {
+      toolCode: error.toolCode || null,
+      message: error.toolMessage || error.message
+    });
+
+    return fallbackSpecs;
+  }
+}
+
 module.exports = {
-  getSpecs() {
-    return getPhotoSpecs();
+  async getSpecs() {
+    const specs = await loadRuntimeSpecs();
+    return {
+      backgroundColors: specs.backgroundColors,
+      sizeCodes: specs.sizeCodes,
+      papers: specs.papers,
+      formats: specs.formats
+    };
   },
 
   async processPhoto({ user, file, payload }) {
-    const validation = validateProcessPhotoPayload(payload, file);
+    await this.assertUserCanProcess(user);
+
+    const specs = await loadRuntimeSpecs();
+    const validation = validateProcessPhotoPayload(payload, file, specs);
     if (!validation.valid) {
       throw new AppError(validation.message, 400, null, validation.businessCode);
     }
@@ -44,49 +99,90 @@ module.exports = {
       throw new AppError('文件不是合法图片', 400, null, 1002);
     }
 
-    await this.assertUserCanProcess(user);
-
     const requestPayload = validation.data;
+    const mergedSpecs = validation.specs || mergeSpecs(specs);
+    const selectedSizeDefinition = mergedSpecs.sizeDefinitions.find((item) => item.sizeCode === requestPayload.sizeCode) || null;
     const sourceUrl = buildAbsoluteUrl(`/uploads/original/${path.basename(file.path)}`);
+    const toolFilePath = buildToolFilePath(file.path);
     const localTaskId = `photo_${uuidv4().replace(/-/g, '')}`;
 
     const taskRecord = await photoRepository.create({
       user_id: user.id,
       task_id: localTaskId,
-      status: 'FAILED',
+      status: 'PROCESSING',
       source_url: sourceUrl,
       size_code: requestPayload.sizeCode,
       background_color: requestPayload.backgroundColor,
       warnings: [],
       quality_status: 'WARNING',
-      quality_message: '处理中失败',
-      request_payload: requestPayload
+      quality_message: '任务处理中',
+      request_payload: {
+        clientRequest: requestPayload,
+        toolFilePath
+      }
     });
 
     try {
-      const toolResponse = await idEditorToolClient.generatePhoto(file, {
-        sizeKey: requestPayload.sizeCode,
-        backgroundColor: requestPayload.backgroundColor,
-        enhance: requestPayload.enhance,
-        saveOutput: true
+      await photoRepository.markProcessing(taskRecord.id, {
+        status: 'PROCESSING',
+        quality_status: 'WARNING',
+        quality_message: '图片检测中'
       });
 
-      const warnings = normalizeWarnings(toolResponse.data?.warnings);
-      const quality = buildQualitySummary(toolResponse.data?.detect, warnings);
-      const previewUrl = idEditorToolClient.createAbsoluteOutputUrl(toolResponse.data?.previewUrl);
-      const resultUrl = idEditorToolClient.createAbsoluteOutputUrl(toolResponse.data?.hdUrl);
+      const detectResponse = await idEditorToolClient.detectPhoto({
+        imageId: localTaskId,
+        originalImagePath: toolFilePath
+      });
+      const detectResult = mapToolDetectResult(detectResponse);
+      assertDetectResult(detectResult);
+
+      const toolRequestPayload = buildGeneratePhotoPayload({
+        imageId: localTaskId,
+        storedImagePath: toolFilePath,
+        sizeCode: requestPayload.sizeCode,
+        backgroundColor: requestPayload.backgroundColor,
+        enhance: requestPayload.enhance,
+        sizeDefinition: selectedSizeDefinition
+      });
+
+      await photoRepository.markProcessing(taskRecord.id, {
+        status: 'PROCESSING',
+        quality_status: 'WARNING',
+        quality_message: '证件照生成中',
+        request_payload: {
+          clientRequest: requestPayload,
+          toolRequest: toolRequestPayload
+        }
+      });
+
+      const toolResponse = await idEditorToolClient.generatePhoto(toolRequestPayload);
+      const generateResult = mapToolGenerateResult(toolResponse);
+      if (!generateResult.previewUrl || !generateResult.hdUrl) {
+        throw new AppError('图像处理失败', 502, null, 2003);
+      }
+      const quality = buildQualitySummary(detectResult, generateResult);
+      const warnings = normalizeTaskWarnings([
+        ...(detectResult.reasons || []),
+        detectResult.pass === false ? detectResult.message : null,
+        ...(generateResult.warnings || [])
+      ]);
+      const previewUrl = idEditorToolClient.createAbsoluteOutputUrl(generateResult.previewUrl);
+      const resultUrl = idEditorToolClient.createAbsoluteOutputUrl(generateResult.hdUrl);
 
       const updatedRecord = await photoRepository.markSuccess(taskRecord.id, {
-        task_id: toolResponse.data?.taskId || taskRecord.task_id,
+        task_id: generateResult.taskId || taskRecord.task_id,
         status: 'SUCCESS',
         preview_url: previewUrl,
         result_url: resultUrl,
-        size_code: toolResponse.data?.size?.key || requestPayload.sizeCode,
-        background_color: toolResponse.data?.backgroundColor || requestPayload.backgroundColor,
+        size_code: selectedSizeDefinition?.sizeCode || requestPayload.sizeCode,
+        background_color: generateResult.backgroundColor || requestPayload.backgroundColor,
         warnings,
         quality_status: quality.qualityStatus,
         quality_message: quality.qualityMessage,
-        response_payload: toolResponse,
+        response_payload: {
+          detect: detectResponse,
+          generate: toolResponse
+        },
         error_code: null,
         error_message: null
       });
@@ -98,31 +194,48 @@ module.exports = {
         resultUrl: updatedRecord.result_url,
         backgroundColor: updatedRecord.background_color,
         sizeCode: updatedRecord.size_code,
-        width: toolResponse.data?.width || null,
-        height: toolResponse.data?.height || null,
+        width: generateResult.pixelWidth,
+        height: generateResult.pixelHeight,
+        widthMm: generateResult.widthMm,
+        heightMm: generateResult.heightMm,
         warnings,
         qualityStatus: updatedRecord.quality_status,
         qualityMessage: updatedRecord.quality_message
       };
     } catch (error) {
-      const mappedError = mapToolErrorToBusiness(error);
+      const mappedError = error instanceof AppError
+        ? {
+            httpStatus: error.statusCode || 400,
+            businessCode: error.businessCode || 9001,
+            message: error.message
+          }
+        : mapToolErrorToBusiness(error);
+
       const failedRecord = await photoRepository.markFailed(taskRecord.id, {
         status: 'FAILED',
         warnings: [],
         quality_status: 'WARNING',
         quality_message: mappedError.message,
         error_code: error.toolCode || String(mappedError.businessCode),
-        error_message: error.toolMessage || mappedError.message,
-        response_payload: serializeToolError(error)
+        error_message: error.toolMessage || error.message || mappedError.message,
+        response_payload: error instanceof AppError ? null : serializeToolError(error)
       });
 
       logger.warn('photo processing failed', {
         userId: user.id,
         localTaskId,
         toolCode: error.toolCode || null,
+        toolMessage: error.toolMessage || null,
+        toolPayload: error.payload || null,
         businessCode: mappedError.businessCode,
         message: mappedError.message
       });
+
+      if (error instanceof AppError) {
+        throw new AppError(error.message, error.statusCode, {
+          taskId: failedRecord?.task_id || localTaskId
+        }, error.businessCode);
+      }
 
       throw new AppError(mappedError.message, mappedError.httpStatus, {
         taskId: failedRecord?.task_id || localTaskId

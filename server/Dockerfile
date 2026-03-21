@@ -13,6 +13,8 @@ COPY . .
 RUN mkdir -p /app/uploads /app/uploads/original /app/uploads/preview /app/uploads/hd /app/uploads/print /app/uploads/temp /app/config \
   && chown -R node:node /app
 
+VOLUME ["/app/uploads"]
+
 ENV NODE_ENV=production
 
 USER node

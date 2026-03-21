@@ -1,12 +1,21 @@
 const photoService = require('./photo.service');
 const { success } = require('../../utils/api-response');
 
-module.exports = {
-  specs(_req, res) {
-    return success(res, photoService.getSpecs(), 'success');
-  },
+const asyncHandler = (handler) => async (req, res, next) => {
+  try {
+    await handler(req, res, next);
+  } catch (error) {
+    next(error);
+  }
+};
 
-  async process(req, res) {
+module.exports = {
+  specs: asyncHandler(async (_req, res) => {
+    const result = await photoService.getSpecs();
+    return success(res, result, 'success');
+  }),
+
+  process: asyncHandler(async (req, res) => {
     const result = await photoService.processPhoto({
       user: req.user,
       file: req.file,
@@ -14,10 +23,10 @@ module.exports = {
     });
 
     return success(res, result, 'success');
-  },
+  }),
 
-  async taskDetail(req, res) {
+  taskDetail: asyncHandler(async (req, res) => {
     const result = await photoService.getTaskDetail(req.params.taskId, req.user.id);
     return success(res, result, 'success');
-  }
+  })
 };

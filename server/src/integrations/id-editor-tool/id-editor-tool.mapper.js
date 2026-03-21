@@ -1,4 +1,4 @@
-const { TOOL_ERROR_TYPES } = require('./id-editor-tool.types');
+const { TOOL_ERROR_TYPES, TOOL_QUALITY_STATUS, TOOL_SOURCE_TYPES } = require('./id-editor-tool.types');
 
 const TOOL_TO_BUSINESS_ERROR = {
   INVALID_IMAGE: { httpStatus: 400, businessCode: 1002, message: '文件不是合法图片' },
@@ -8,6 +8,120 @@ const TOOL_TO_BUSINESS_ERROR = {
   INVALID_ARGUMENT: { httpStatus: 400, businessCode: 1006, message: '参数非法' },
   PROCESS_FAILED: { httpStatus: 502, businessCode: 2003, message: '图像处理失败' }
 };
+
+const DEFAULT_SIZE_SOURCE_TYPE = TOOL_SOURCE_TYPES.SCENE;
+const DEFAULT_PRINT_LAYOUT = 'six';
+
+function unique(values = []) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function unwrapToolData(payload) {
+  if (payload == null) return null;
+  if (payload.data != null) return payload.data;
+  if (payload.result != null) return payload.result;
+  if (payload.payload != null) return payload.payload;
+  return payload;
+}
+
+function toArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value == null) return [];
+  return [value];
+}
+
+function pickFirstString(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function pickFirstNumber(...values) {
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) return Number(value);
+  }
+  return null;
+}
+
+function normalizeBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value > 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'y', 'pass', 'passed', 'ok'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'n', 'fail', 'failed'].includes(normalized)) return false;
+  }
+  return null;
+}
+
+function normalizeColorItem(item) {
+  if (typeof item === 'string') return item.trim().toLowerCase();
+  if (!item || typeof item !== 'object') return null;
+  return pickFirstString(item.code, item.key, item.value, item.color, item.name)?.toLowerCase() || null;
+}
+
+function normalizeSizeItem(item) {
+  if (!item || typeof item !== 'object') return null;
+
+  const sizeCode = pickFirstString(item.sizeCode, item.code, item.sceneKey, item.key, item.id);
+  if (!sizeCode) return null;
+
+  const sourceType = pickFirstString(item.sourceType, item.type, DEFAULT_SIZE_SOURCE_TYPE) || DEFAULT_SIZE_SOURCE_TYPE;
+  const backgroundColors = unique(
+    toArray(item.backgroundColors || item.supportedBackgroundColors || item.colors)
+      .map(normalizeColorItem)
+  );
+
+  return {
+    sizeCode,
+    sceneKey: pickFirstString(item.sceneKey, item.key, sizeCode),
+    sourceType,
+    name: pickFirstString(item.name, item.label, item.title, sizeCode),
+    widthMm: pickFirstNumber(item.widthMm, item.width, item.customWidthMm),
+    heightMm: pickFirstNumber(item.heightMm, item.height, item.customHeightMm),
+    pixelWidth: pickFirstNumber(item.pixelWidth, item.widthPx, item.width_px),
+    pixelHeight: pickFirstNumber(item.pixelHeight, item.heightPx, item.height_px),
+    paper: pickFirstString(item.paper, item.paperCode, item.paperType, item.layoutType, item.printLayoutType),
+    format: pickFirstString(item.format, item.fileFormat, item.imageFormat, item.ext),
+    backgroundColors
+  };
+}
+
+function extractColorList(response) {
+  const data = unwrapToolData(response);
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.colors)) return data.colors;
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data?.list)) return data.list;
+  return [];
+}
+
+function extractPhotoSizeList(response) {
+  const data = unwrapToolData(response);
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.photoSizes)) return data.photoSizes;
+  if (Array.isArray(data?.sizes)) return data.sizes;
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data?.list)) return data.list;
+  return [];
+}
+
+function inferBusinessErrorKey(error) {
+  const toolCode = pickFirstString(error?.toolCode, error?.payload?.error?.code, error?.payload?.code);
+  if (toolCode && TOOL_TO_BUSINESS_ERROR[toolCode]) return toolCode;
+
+  const text = `${pickFirstString(error?.toolMessage, error?.message, error?.payload?.message, error?.payload?.error?.message) || ''}`.toLowerCase();
+
+  if (/multiple\s+faces|more than one face|too many faces/.test(text)) return 'MULTIPLE_FACES_DETECTED';
+  if (/no face|face not detected|face not found|未检测到/.test(text)) return 'NO_FACE_DETECTED';
+  if (/too small|image too small|尺寸过小/.test(text)) return 'IMAGE_TOO_SMALL';
+  if (/invalid image|not a valid image|unsupported image|文件不是合法图片/.test(text)) return 'INVALID_IMAGE';
+  if (/invalid|scenekey|background|layout|argument|source.?type|photo.?size|color/.test(text)) return 'INVALID_ARGUMENT';
+  if (/failed|error while processing|generate.*failed|process.*failed/.test(text)) return 'PROCESS_FAILED';
+  return null;
+}
 
 function mapToolErrorToBusiness(error) {
   if (!error) {
@@ -22,41 +136,173 @@ function mapToolErrorToBusiness(error) {
     return { httpStatus: 502, businessCode: 2001, message: '工具服务不可用' };
   }
 
-  if (error.toolCode && TOOL_TO_BUSINESS_ERROR[error.toolCode]) {
-    const mapped = TOOL_TO_BUSINESS_ERROR[error.toolCode];
+  const inferredKey = inferBusinessErrorKey(error);
+  if (inferredKey && TOOL_TO_BUSINESS_ERROR[inferredKey]) {
+    const mapped = TOOL_TO_BUSINESS_ERROR[inferredKey];
     return {
       httpStatus: mapped.httpStatus,
       businessCode: mapped.businessCode,
-      message: error.toolMessage || mapped.message
+      message: mapped.message
     };
   }
 
   if (error.type === TOOL_ERROR_TYPES.RESPONSE_ERROR) {
-    return { httpStatus: 502, businessCode: 2003, message: error.toolMessage || '图像处理失败' };
+    return { httpStatus: 502, businessCode: 2003, message: '图像处理失败' };
   }
 
   return { httpStatus: 500, businessCode: 9001, message: '系统内部错误' };
 }
 
-function buildQualitySummary(detect = {}, warnings = []) {
-  const normalizedWarnings = Array.isArray(warnings) ? warnings.filter(Boolean) : [];
-  const detectReasons = Array.isArray(detect.reasons) ? detect.reasons.filter(Boolean) : [];
+function mapToolDetectResult(response = {}) {
+  const data = unwrapToolData(response) || {};
+  const hasFace = normalizeBoolean(data.hasFace);
+  const rawFaceCount = pickFirstNumber(data.faceCount, data.faces, data.faceNum);
+  const faceCount = rawFaceCount != null ? rawFaceCount : (hasFace === true ? 1 : 0);
+  const blurScore = pickFirstNumber(data.blurScore, data.blur, data.qualityScore);
+  const poseValid = normalizeBoolean(data.poseValid);
+  const occlusionDetected = normalizeBoolean(data.occlusionDetected);
+  const message = pickFirstString(data.message, response.message);
+  const reasons = unique(toArray(data.reasons || data.warnings || data.messages).map((item) => pickFirstString(item, item?.message)));
 
-  if (detect.pass === true && normalizedWarnings.length === 0) {
+  return {
+    imageId: pickFirstString(data.imageId, data.taskId),
+    hasFace,
+    faceCount,
+    blurScore,
+    poseValid,
+    occlusionDetected,
+    message,
+    reasons,
+    pass: hasFace !== false && faceCount <= 1 && poseValid !== false && occlusionDetected !== true
+  };
+}
+
+function normalizeWarnings(warnings = []) {
+  return unique(toArray(warnings).map((item) => {
+    if (typeof item === 'string') return item.trim();
+    if (item && typeof item === 'object') return pickFirstString(item.message, item.reason, item.code, JSON.stringify(item));
+    return null;
+  }));
+}
+
+function normalizeQualityStatus(status) {
+  const normalized = pickFirstString(status)?.toLowerCase();
+  if (normalized === TOOL_QUALITY_STATUS.PASSED) return 'PASSED';
+  if (normalized === TOOL_QUALITY_STATUS.WARNING) return 'WARNING';
+  if (normalized === TOOL_QUALITY_STATUS.FAILED) return 'FAILED';
+  return null;
+}
+
+function mapToolGenerateResult(response = {}) {
+  const data = unwrapToolData(response) || {};
+  const output = data.output && typeof data.output === 'object' ? data.output : {};
+  const size = data.size && typeof data.size === 'object' ? data.size : {};
+  const warnings = normalizeWarnings(data.warnings || output.warnings);
+
+  return {
+    taskId: pickFirstString(data.taskId, data.imageId),
+    imageId: pickFirstString(data.imageId, data.taskId),
+    previewUrl: pickFirstString(data.previewUrl, data.previewPath, output.previewUrl, output.previewPath),
+    hdUrl: pickFirstString(data.hdUrl, data.resultUrl, data.hdPath, output.hdUrl, output.resultUrl, output.hdPath),
+    printUrl: pickFirstString(data.printUrl, output.printUrl),
+    backgroundColor: pickFirstString(data.backgroundColor, output.backgroundColor),
+    widthMm: pickFirstNumber(data.widthMm, size.widthMm, data.width, size.width),
+    heightMm: pickFirstNumber(data.heightMm, size.heightMm, data.height, size.height),
+    pixelWidth: pickFirstNumber(data.pixelWidth, data.widthPx, size.pixelWidth, size.widthPx),
+    pixelHeight: pickFirstNumber(data.pixelHeight, data.heightPx, size.pixelHeight, size.heightPx),
+    qualityStatus: normalizeQualityStatus(data.qualityStatus || output.qualityStatus),
+    warnings,
+    raw: data
+  };
+}
+
+function buildQualitySummary(detect = {}, generate = {}) {
+  const messages = unique([
+    ...normalizeWarnings(generate.warnings),
+    ...normalizeWarnings(detect.reasons),
+    detect.pass === false ? detect.message : null
+  ]);
+
+  const explicitStatus = generate.qualityStatus;
+  if (explicitStatus === 'FAILED') {
+    return {
+      qualityStatus: 'FAILED',
+      qualityMessage: messages[0] || '质量检测未通过'
+    };
+  }
+
+  if (explicitStatus === 'PASSED' && detect.pass !== false && messages.length === 0) {
     return {
       qualityStatus: 'PASSED',
       qualityMessage: '质量检测通过'
     };
   }
 
-  const messages = [...detectReasons, ...normalizedWarnings];
+  if (detect.pass === false || explicitStatus === 'WARNING' || messages.length > 0) {
+    return {
+      qualityStatus: 'WARNING',
+      qualityMessage: messages.length > 0 ? messages.join('；') : '检测存在风险，请确认生成结果'
+    };
+  }
+
   return {
-    qualityStatus: 'WARNING',
-    qualityMessage: messages.length > 0 ? messages.join('；') : '检测存在风险，请确认生成结果'
+    qualityStatus: 'PASSED',
+    qualityMessage: '质量检测通过'
   };
+}
+
+function mapToolSpecs({ colorsResponse, photoSizesResponse, fallbackSpecs }) {
+  const fallback = fallbackSpecs || {};
+  const colors = unique(extractColorList(colorsResponse).map(normalizeColorItem));
+  const sizeDefinitions = extractPhotoSizeList(photoSizesResponse)
+    .map(normalizeSizeItem)
+    .filter(Boolean);
+
+  const sizeCodes = unique(sizeDefinitions.map((item) => item.sizeCode));
+  const formats = unique(sizeDefinitions.map((item) => pickFirstString(item.format)?.toLowerCase()));
+  const papers = unique(sizeDefinitions.map((item) => pickFirstString(item.paper)?.toLowerCase()));
+
+  return {
+    backgroundColors: colors.length > 0 ? colors : fallback.backgroundColors,
+    sizeCodes: sizeCodes.length > 0 ? sizeCodes : fallback.sizeCodes,
+    papers: papers.length > 0 ? papers : fallback.papers,
+    formats: formats.length > 0 ? formats : fallback.formats,
+    sizeDefinitions: sizeDefinitions.length > 0 ? sizeDefinitions : (fallback.sizeDefinitions || [])
+  };
+}
+
+function buildGeneratePhotoPayload({ imageId, storedImagePath, sizeCode, backgroundColor, enhance, sizeDefinition }) {
+  const sourceType = pickFirstString(sizeDefinition?.sourceType, DEFAULT_SIZE_SOURCE_TYPE) || DEFAULT_SIZE_SOURCE_TYPE;
+  const sceneKey = pickFirstString(sizeDefinition?.sceneKey, sizeDefinition?.sizeCode, sizeCode);
+  const payload = {
+    imageId,
+    sourceType,
+    sceneKey: sourceType === TOOL_SOURCE_TYPES.SCENE ? sceneKey : null,
+    customWidthMm: sourceType === TOOL_SOURCE_TYPES.CUSTOM ? pickFirstNumber(sizeDefinition?.widthMm) : null,
+    customHeightMm: sourceType === TOOL_SOURCE_TYPES.CUSTOM ? pickFirstNumber(sizeDefinition?.heightMm) : null,
+    backgroundColor,
+    beautyEnabled: !!enhance,
+    printLayoutType: pickFirstString(sizeDefinition?.paper, DEFAULT_PRINT_LAYOUT),
+    originalImagePath: storedImagePath
+  };
+
+  if (payload.sourceType !== TOOL_SOURCE_TYPES.CUSTOM) {
+    delete payload.customWidthMm;
+    delete payload.customHeightMm;
+  }
+
+  if (!payload.printLayoutType) {
+    delete payload.printLayoutType;
+  }
+
+  return payload;
 }
 
 module.exports = {
   mapToolErrorToBusiness,
-  buildQualitySummary
+  mapToolDetectResult,
+  mapToolGenerateResult,
+  mapToolSpecs,
+  buildQualitySummary,
+  buildGeneratePhotoPayload
 };

@@ -1,6 +1,3 @@
-const fs = require('fs/promises');
-const path = require('path');
-const { File } = require('node:buffer');
 const appConfig = require('../../config/app.config');
 const logger = require('../../utils/logger');
 const { IdEditorToolError, TOOL_ERROR_TYPES } = require('./id-editor-tool.types');
@@ -16,19 +13,33 @@ class IdEditorToolClient {
     return this.request('/health', { method: 'GET' });
   }
 
-  async detectPhoto(file) {
-    const formData = await this.createFileFormData(file);
-    return this.request('/detect', { method: 'POST', body: formData });
+  async getAvailableColors() {
+    return this.request('/ai/colors', { method: 'GET' });
   }
 
-  async generatePhoto(file, options = {}) {
-    const formData = await this.createFileFormData(file);
-    if (options.sceneId) formData.append('sceneId', String(options.sceneId));
-    if (options.sizeKey) formData.append('sizeKey', String(options.sizeKey));
-    if (options.backgroundColor) formData.append('backgroundColor', String(options.backgroundColor));
-    if (typeof options.enhance === 'boolean') formData.append('enhance', String(options.enhance));
-    if (typeof options.saveOutput === 'boolean') formData.append('saveOutput', String(options.saveOutput));
-    return this.request('/generate', { method: 'POST', body: formData });
+  async getPhotoSizes() {
+    return this.request('/ai/photo-sizes', { method: 'GET' });
+  }
+
+  async detectPhoto(payload) {
+    return this.request('/ai/detect', {
+      method: 'POST',
+      body: payload
+    });
+  }
+
+  async generatePhoto(payload) {
+    return this.request('/ai/generate-id-photo', {
+      method: 'POST',
+      body: payload
+    });
+  }
+
+  async generatePrintLayout(payload) {
+    return this.request('/ai/generate-print-layout', {
+      method: 'POST',
+      body: payload
+    });
   }
 
   createAbsoluteOutputUrl(relativePath) {
@@ -37,26 +48,26 @@ class IdEditorToolClient {
     return new URL(relativePath.startsWith('/') ? relativePath : `/${relativePath}`, `${this.publicBaseUrl}/`).toString();
   }
 
-  async createFileFormData(file) {
-    const formData = new FormData();
-    const fileBuffer = await fs.readFile(file.path);
-    const uploadFile = new File([fileBuffer], file.originalname || path.basename(file.path), {
-      type: file.mimetype || 'application/octet-stream'
-    });
-    formData.append('file', uploadFile);
-    return formData;
-  }
-
   async request(requestPath, { method = 'GET', body } = {}) {
     const controller = new AbortController();
     const requestUrl = `${this.baseUrl}${requestPath}`;
     const startedAt = Date.now();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+    const headers = {
+      Accept: 'application/json'
+    };
+
+    let requestBody;
+    if (body !== undefined && body !== null) {
+      headers['Content-Type'] = 'application/json';
+      requestBody = JSON.stringify(body);
+    }
 
     try {
       const response = await fetch(requestUrl, {
         method,
-        body,
+        headers,
+        body: requestBody,
         signal: controller.signal
       });
 
@@ -99,13 +110,19 @@ class IdEditorToolClient {
           method,
           durationMs,
           toolCode: error.toolCode,
-          message: error.message
+          message: error.message,
+          payload: error.payload || null
         });
         throw error;
       }
 
       if (error.name === 'AbortError') {
-        logger.error('id-editor-tool timeout', { path: requestPath, method, durationMs, timeout: this.timeout });
+        logger.error('id-editor-tool timeout', {
+          path: requestPath,
+          method,
+          durationMs,
+          timeout: this.timeout
+        });
         throw new IdEditorToolError('工具服务超时', {
           type: TOOL_ERROR_TYPES.TIMEOUT,
           toolMessage: '工具服务超时',

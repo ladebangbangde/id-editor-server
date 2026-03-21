@@ -109,7 +109,8 @@ cp id-editor-server/.env id-editor-server/.env
 - `DB_CONFIG_JSON`（可选，JSON 字符串注入）
 - `DB_CONFIG_FILE`（可选，JSON 文件路径，适合挂载外部配置）
 - `AI_SERVICE_BASE_URL=http://id-editor-tool:8000`
-- `UPLOAD_BASE_DIR=/app/uploads`
+- `UPLOAD_DIR=/app/uploads`
+- `TOOL_SHARED_UPLOAD_ROOT=/app/uploads`
 - `LOG_LEVEL=info`
 - `JWT_SECRET=replace_with_secure_value`
 - `ORDER_CURRENCY=CNY`

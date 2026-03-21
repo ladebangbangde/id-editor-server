@@ -5,6 +5,17 @@ const TOOL_ERROR_TYPES = {
   UNKNOWN: 'UNKNOWN'
 };
 
+const TOOL_QUALITY_STATUS = {
+  PASSED: 'passed',
+  WARNING: 'warning',
+  FAILED: 'failed'
+};
+
+const TOOL_SOURCE_TYPES = {
+  SCENE: 'scene',
+  CUSTOM: 'custom'
+};
+
 class IdEditorToolError extends Error {
   constructor(message, options = {}) {
     super(message);
@@ -20,5 +31,7 @@ class IdEditorToolError extends Error {
 
 module.exports = {
   TOOL_ERROR_TYPES,
+  TOOL_QUALITY_STATUS,
+  TOOL_SOURCE_TYPES,
   IdEditorToolError
 };
