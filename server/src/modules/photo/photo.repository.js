@@ -5,6 +5,13 @@ module.exports = {
     return PhotoTask.create(payload);
   },
 
+  async markProcessing(id, payload) {
+    const record = await PhotoTask.findByPk(id);
+    if (!record) return null;
+    await record.update(payload);
+    return record;
+  },
+
   async markSuccess(id, payload) {
     const record = await PhotoTask.findByPk(id);
     if (!record) return null;

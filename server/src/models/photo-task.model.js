@@ -5,7 +5,7 @@ module.exports = sequelize.define('PhotoTask', {
   id: { type: DataTypes.BIGINT.UNSIGNED, autoIncrement: true, primaryKey: true },
   user_id: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false },
   task_id: { type: DataTypes.STRING(64), allowNull: false, unique: true },
-  status: { type: DataTypes.ENUM('SUCCESS', 'FAILED'), allowNull: false, defaultValue: 'FAILED' },
+  status: { type: DataTypes.ENUM('PENDING', 'PROCESSING', 'SUCCESS', 'FAILED'), allowNull: false, defaultValue: 'PENDING' },
   source_url: { type: DataTypes.STRING(255), allowNull: false },
   preview_url: DataTypes.STRING(255),
   result_url: DataTypes.STRING(255),
