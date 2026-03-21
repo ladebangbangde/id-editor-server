@@ -7,8 +7,11 @@ const appConfig = require('./config/app.config');
 const { ensureUploadDirs } = require('./utils/file-helper');
 const auth = require('./middlewares/auth.middleware');
 const errorHandler = require('./middlewares/error.middleware');
+
 const app = express();
+
 ensureUploadDirs();
+
 app.use(cors());
 app.use(morgan('combined'));
 app.use(express.json({ limit: '2mb' }));
@@ -25,5 +28,7 @@ app.use(`${appConfig.apiPrefix}/tasks`, require('./routes/task.routes'));
 app.use(`${appConfig.apiPrefix}/orders`, require('./routes/order.routes'));
 app.use(`${appConfig.apiPrefix}/download`, require('./routes/download.routes'));
 app.use(`${appConfig.apiPrefix}/admin`, require('./routes/admin.routes'));
+app.use(`${appConfig.apiPrefix}/photo`, require('./routes/photo.routes'));
 app.use(errorHandler);
+
 module.exports = app;

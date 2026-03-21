@@ -6,12 +6,16 @@ const SpecTemplate = require('./spec-template.model');
 const Image = require('./image.model');
 const ImageTask = require('./image-task.model');
 const ImageResult = require('./image-result.model');
+const PhotoTask = require('./photo-task.model');
 const Order = require('./order.model');
 const PaymentRecord = require('./payment-record.model');
 const DownloadRecord = require('./download-record.model');
 const AdminUser = require('./admin-user.model');
+
 User.hasMany(Image, { foreignKey: 'user_id' });
 Image.belongsTo(User, { foreignKey: 'user_id' });
+User.hasMany(PhotoTask, { foreignKey: 'user_id' });
+PhotoTask.belongsTo(User, { foreignKey: 'user_id' });
 Image.hasMany(ImageTask, { foreignKey: 'image_id' });
 ImageTask.belongsTo(Image, { foreignKey: 'image_id' });
 Image.hasMany(ImageResult, { foreignKey: 'image_id' });
@@ -22,4 +26,19 @@ Order.belongsTo(User, { foreignKey: 'user_id' });
 Order.belongsTo(Image, { foreignKey: 'image_id' });
 Order.belongsTo(ImageResult, { foreignKey: 'result_id' });
 PaymentRecord.belongsTo(Order, { foreignKey: 'order_id' });
-module.exports = { sequelize, User, SceneTemplate, SpecCategory, SpecTemplate, Image, ImageTask, ImageResult, Order, PaymentRecord, DownloadRecord, AdminUser };
+
+module.exports = {
+  sequelize,
+  User,
+  SceneTemplate,
+  SpecCategory,
+  SpecTemplate,
+  Image,
+  ImageTask,
+  ImageResult,
+  PhotoTask,
+  Order,
+  PaymentRecord,
+  DownloadRecord,
+  AdminUser
+};

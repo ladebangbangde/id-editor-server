@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS photo_tasks (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  task_id VARCHAR(64) NOT NULL UNIQUE,
+  status ENUM('SUCCESS', 'FAILED') NOT NULL DEFAULT 'FAILED',
+  source_url VARCHAR(255) NOT NULL,
+  preview_url VARCHAR(255) NULL,
+  result_url VARCHAR(255) NULL,
+  size_code VARCHAR(64) NOT NULL,
+  background_color VARCHAR(32) NOT NULL,
+  warnings JSON NOT NULL,
+  quality_status VARCHAR(32) NOT NULL,
+  quality_message VARCHAR(255) NOT NULL,
+  error_code VARCHAR(64) NULL,
+  error_message VARCHAR(255) NULL,
+  request_payload JSON NOT NULL,
+  response_payload JSON NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_photo_tasks_user_created (user_id, created_at),
+  KEY idx_photo_tasks_task_id (task_id)
+);
