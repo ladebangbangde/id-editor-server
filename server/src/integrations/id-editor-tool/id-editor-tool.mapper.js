@@ -12,6 +12,15 @@ const TOOL_TO_BUSINESS_ERROR = {
 const DEFAULT_SIZE_SOURCE_TYPE = TOOL_SOURCE_TYPES.SCENE;
 const DEFAULT_PRINT_LAYOUT = 'six';
 
+const DEFAULT_FAILURE_SUGGESTIONS = {
+  INVALID_IMAGE: ['请上传清晰且格式合法的图片文件'],
+  NO_FACE_DETECTED: ['请上传包含清晰正脸的人像照片'],
+  MULTIPLE_FACES_DETECTED: ['请确保画面中仅有一人入镜'],
+  IMAGE_TOO_SMALL: ['请上传分辨率更高、头像区域更清晰的照片'],
+  INVALID_ARGUMENT: ['请检查所选尺寸、底色等参数后重试'],
+  PROCESS_FAILED: ['请上传清晰、正面、完整的人像照片后重试']
+};
+
 function unique(values = []) {
   return [...new Set(values.filter(Boolean))];
 }
@@ -43,6 +52,16 @@ function pickFirstNumber(...values) {
     if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) return Number(value);
   }
   return null;
+}
+
+function normalizeTextList(value) {
+  return unique(toArray(value).map((item) => {
+    if (typeof item === 'string') return item.trim();
+    if (item && typeof item === 'object') {
+      return pickFirstString(item.message, item.reason, item.suggestion, item.text, item.title, item.code);
+    }
+    return null;
+  }));
 }
 
 function normalizeBoolean(value) {
@@ -108,6 +127,67 @@ function extractPhotoSizeList(response) {
   return [];
 }
 
+function extractFailureDetails(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return { reasons: [], suggestions: [] };
+  }
+
+  const data = unwrapToolData(payload) || {};
+  const nestedError = payload.error && typeof payload.error === 'object' ? payload.error : {};
+  const reasons = unique([
+    ...normalizeTextList(nestedError.reasons),
+    ...normalizeTextList(nestedError.messages),
+    ...normalizeTextList(nestedError.warnings),
+    ...normalizeTextList(data.reasons),
+    ...normalizeTextList(data.messages),
+    ...normalizeTextList(data.warnings),
+    ...normalizeTextList(payload.reasons),
+    ...normalizeTextList(payload.messages),
+    ...normalizeTextList(payload.warnings)
+  ]);
+  const suggestions = unique([
+    ...normalizeTextList(nestedError.suggestions),
+    ...normalizeTextList(data.suggestions),
+    ...normalizeTextList(payload.suggestions),
+    ...normalizeTextList(data.actions),
+    ...normalizeTextList(payload.actions)
+  ]);
+
+  return { reasons, suggestions };
+}
+
+function inferFailureSuggestions(errorKey, reasons = [], message = '') {
+  const text = `${message} ${reasons.join(' ')}`.toLowerCase();
+  const inferred = [];
+
+  if (/遮挡|occlusion|blocked|cover|眼.*遮|右眼|左眼/.test(text)) inferred.push('请露出双眼与完整面部');
+  if (/姿态|pose|正面|侧脸|turn|yaw|pitch/.test(text)) inferred.push('请正对镜头拍摄');
+  if (/裁切|crop|构图|framing|head out|头部不全|边缘/.test(text)) inferred.push('请让人脸位于画面中央并保留完整头部');
+  if (/模糊|blur/.test(text)) inferred.push('请在光线充足环境下拍摄清晰照片');
+
+  if (inferred.length > 0) return unique(inferred);
+  return DEFAULT_FAILURE_SUGGESTIONS[errorKey] || DEFAULT_FAILURE_SUGGESTIONS.PROCESS_FAILED;
+}
+
+function buildFailureDetails({ error, payload, fallbackMessage, errorKey } = {}) {
+  const sourcePayload = payload || error?.payload || error?.data || null;
+  const details = extractFailureDetails(sourcePayload);
+  const message = pickFirstString(
+    fallbackMessage,
+    error?.toolMessage,
+    error?.message,
+    sourcePayload?.message,
+    sourcePayload?.error?.message
+  ) || '处理失败';
+  const reasons = details.reasons.length > 0 ? details.reasons : [message];
+  const inferredKey = errorKey || inferBusinessErrorKey(error || { payload: sourcePayload }) || 'PROCESS_FAILED';
+  const suggestions = details.suggestions.length > 0
+    ? details.suggestions
+    : inferFailureSuggestions(inferredKey, reasons, message);
+
+  return { reasons, suggestions };
+}
+
 function inferBusinessErrorKey(error) {
   const toolCode = pickFirstString(error?.toolCode, error?.payload?.error?.code, error?.payload?.code);
   if (toolCode && TOOL_TO_BUSINESS_ERROR[toolCode]) return toolCode;
@@ -165,6 +245,7 @@ function mapToolDetectResult(response = {}) {
   const occlusionDetected = normalizeBoolean(detect.occlusionDetected);
   const message = pickFirstString(detect.message, data.message, response.message);
   const reasons = unique(toArray(detect.reasons || detect.warnings || detect.messages).map((item) => pickFirstString(item, item?.message)));
+  const suggestions = normalizeTextList(detect.suggestions || data.suggestions || response.suggestions);
 
   return {
     imageId: pickFirstString(detect.imageId, detect.taskId, data.imageId, data.taskId),
@@ -175,6 +256,7 @@ function mapToolDetectResult(response = {}) {
     occlusionDetected,
     message,
     reasons,
+    suggestions,
     pass: hasFace !== false && faceCount <= 1 && poseValid !== false && occlusionDetected !== true
   };
 }
@@ -345,5 +427,7 @@ module.exports = {
   mapToolGenerateResult,
   mapToolSpecs,
   buildQualitySummary,
-  buildGeneratePhotoPayload
+  buildGeneratePhotoPayload,
+  buildFailureDetails,
+  inferBusinessErrorKey
 };

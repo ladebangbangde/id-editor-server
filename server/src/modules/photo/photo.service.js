@@ -9,7 +9,9 @@ const {
   mapToolDetectResult,
   mapToolGenerateResult,
   buildQualitySummary,
-  buildGeneratePhotoPayload
+  buildGeneratePhotoPayload,
+  buildFailureDetails,
+  inferBusinessErrorKey
 } = require('../../integrations/id-editor-tool/id-editor-tool.mapper');
 const photoRepository = require('./photo.repository');
 const { getPhotoSpecs, mergeSpecs, validateProcessPhotoPayload } = require('./dto/process-photo.dto');
@@ -40,13 +42,41 @@ function normalizeTaskWarnings(warnings) {
   return Array.isArray(warnings) ? warnings.filter(Boolean) : [];
 }
 
-function assertDetectResult(detectResult) {
+function createStructuredFailureData({ taskId, message, reasons, suggestions }) {
+  return {
+    taskId,
+    reasons: Array.isArray(reasons) && reasons.length > 0 ? reasons : [message],
+    suggestions: Array.isArray(suggestions) && suggestions.length > 0 ? suggestions : ['请上传清晰、正面、完整的人像照片后重试']
+  };
+}
+
+function buildAppErrorFailureData(error, taskId) {
+  const existing = error?.data && typeof error.data === 'object' ? error.data : {};
+  return createStructuredFailureData({
+    taskId: existing.taskId || taskId,
+    message: error.message,
+    reasons: existing.reasons,
+    suggestions: existing.suggestions
+  });
+}
+
+function assertDetectResult(detectResult, taskId) {
   if (detectResult.hasFace === false) {
-    throw new AppError('未检测到有效人像', 400, null, 1004);
+    throw new AppError('未检测到有效人像', 400, createStructuredFailureData({
+      taskId,
+      message: '未检测到有效人像',
+      reasons: detectResult.reasons,
+      suggestions: detectResult.suggestions
+    }), 1004);
   }
 
   if (typeof detectResult.faceCount === 'number' && detectResult.faceCount > 1) {
-    throw new AppError('检测到多个人像', 400, null, 1005);
+    throw new AppError('检测到多个人像', 400, createStructuredFailureData({
+      taskId,
+      message: '检测到多个人像',
+      reasons: detectResult.reasons,
+      suggestions: detectResult.suggestions
+    }), 1005);
   }
 }
 
@@ -71,11 +101,11 @@ module.exports = {
     const specs = await loadRuntimeSpecs();
     const validation = validateProcessPhotoPayload(payload, file, specs);
     if (!validation.valid) {
-      throw new AppError(validation.message, 400, null, validation.businessCode);
+      throw new AppError(validation.message, 400, createStructuredFailureData({ taskId: null, message: validation.message }), validation.businessCode);
     }
 
     if (!file.mimetype || !file.mimetype.startsWith('image/')) {
-      throw new AppError('文件不是合法图片', 400, null, 1002);
+      throw new AppError('文件不是合法图片', 400, createStructuredFailureData({ taskId: null, message: '文件不是合法图片' }), 1002);
     }
 
     const requestPayload = validation.data;
@@ -113,7 +143,7 @@ module.exports = {
       };
       const detectResponse = await idEditorToolClient.detectPhoto(detectRequestPayload);
       const detectResult = mapToolDetectResult(detectResponse);
-      assertDetectResult(detectResult);
+      assertDetectResult(detectResult, taskRecord.task_id);
 
       const toolRequestPayload = buildGeneratePhotoPayload({
         storedImagePath: toolFilePath,
@@ -212,14 +242,25 @@ module.exports = {
       });
 
       if (error instanceof AppError) {
-        throw new AppError(error.message, error.statusCode, {
-          taskId: failedRecord?.task_id || localTaskId
-        }, error.businessCode);
+        throw new AppError(
+          error.message,
+          error.statusCode,
+          buildAppErrorFailureData(error, failedRecord?.task_id || localTaskId),
+          error.businessCode
+        );
       }
 
-      throw new AppError(mappedError.message, mappedError.httpStatus, {
-        taskId: failedRecord?.task_id || localTaskId
-      }, mappedError.businessCode);
+      const structuredFailure = createStructuredFailureData({
+        taskId: failedRecord?.task_id || localTaskId,
+        message: mappedError.message,
+        ...buildFailureDetails({
+          error,
+          fallbackMessage: mappedError.message,
+          errorKey: inferBusinessErrorKey(error)
+        })
+      });
+
+      throw new AppError(mappedError.message, mappedError.httpStatus, structuredFailure, mappedError.businessCode);
     }
   },
 
@@ -245,11 +286,11 @@ module.exports = {
 
   async assertUserCanProcess(user) {
     if (!user || !user.id) {
-      throw new AppError('登录态无效', 401, null, 9001);
+      throw new AppError('登录态无效', 401, createStructuredFailureData({ taskId: null, message: '登录态无效' }), 9001);
     }
 
     if (user.status !== 1) {
-      throw new AppError('用户状态不可用', 403, null, 9001);
+      throw new AppError('用户状态不可用', 403, createStructuredFailureData({ taskId: null, message: '用户状态不可用' }), 9001);
     }
   }
 };
