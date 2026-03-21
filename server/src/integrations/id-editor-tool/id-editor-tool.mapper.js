@@ -118,7 +118,7 @@ function inferBusinessErrorKey(error) {
   if (/no face|face not detected|face not found|未检测到/.test(text)) return 'NO_FACE_DETECTED';
   if (/too small|image too small|尺寸过小/.test(text)) return 'IMAGE_TOO_SMALL';
   if (/invalid image|not a valid image|unsupported image|文件不是合法图片/.test(text)) return 'INVALID_IMAGE';
-  if (/invalid|scenekey|background|layout|argument|source.?type|photo.?size|color/.test(text)) return 'INVALID_ARGUMENT';
+  if (/invalid|sceneid|scenekey|sizekey|background|layout|argument|source.?type|photo.?size|color/.test(text)) return 'INVALID_ARGUMENT';
   if (/failed|error while processing|generate.*failed|process.*failed/.test(text)) return 'PROCESS_FAILED';
   return null;
 }
@@ -155,17 +155,19 @@ function mapToolErrorToBusiness(error) {
 
 function mapToolDetectResult(response = {}) {
   const data = unwrapToolData(response) || {};
-  const hasFace = normalizeBoolean(data.hasFace);
-  const rawFaceCount = pickFirstNumber(data.faceCount, data.faces, data.faceNum);
+  const detect = data.detect && typeof data.detect === 'object' ? data.detect : data;
+  const faces = Array.isArray(detect.faces) ? detect.faces.length : null;
+  const hasFace = normalizeBoolean(detect.hasFace ?? detect.detected ?? (faces != null ? faces > 0 : null));
+  const rawFaceCount = pickFirstNumber(detect.faceCount, detect.faces, detect.faceNum, faces);
   const faceCount = rawFaceCount != null ? rawFaceCount : (hasFace === true ? 1 : 0);
-  const blurScore = pickFirstNumber(data.blurScore, data.blur, data.qualityScore);
-  const poseValid = normalizeBoolean(data.poseValid);
-  const occlusionDetected = normalizeBoolean(data.occlusionDetected);
-  const message = pickFirstString(data.message, response.message);
-  const reasons = unique(toArray(data.reasons || data.warnings || data.messages).map((item) => pickFirstString(item, item?.message)));
+  const blurScore = pickFirstNumber(detect.blurScore, detect.blur, detect.qualityScore);
+  const poseValid = normalizeBoolean(detect.poseValid);
+  const occlusionDetected = normalizeBoolean(detect.occlusionDetected);
+  const message = pickFirstString(detect.message, data.message, response.message);
+  const reasons = unique(toArray(detect.reasons || detect.warnings || detect.messages).map((item) => pickFirstString(item, item?.message)));
 
   return {
-    imageId: pickFirstString(data.imageId, data.taskId),
+    imageId: pickFirstString(detect.imageId, detect.taskId, data.imageId, data.taskId),
     hasFace,
     faceCount,
     blurScore,
@@ -193,18 +195,61 @@ function normalizeQualityStatus(status) {
   return null;
 }
 
+function pickOutputPath(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (value && typeof value === 'object') {
+      const nested = pickFirstString(value.url, value.path, value.pathname, value.outputUrl, value.outputPath);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
 function mapToolGenerateResult(response = {}) {
   const data = unwrapToolData(response) || {};
   const output = data.output && typeof data.output === 'object' ? data.output : {};
+  const files = data.files && typeof data.files === 'object' ? data.files : {};
   const size = data.size && typeof data.size === 'object' ? data.size : {};
   const warnings = normalizeWarnings(data.warnings || output.warnings);
 
   return {
     taskId: pickFirstString(data.taskId, data.imageId),
     imageId: pickFirstString(data.imageId, data.taskId),
-    previewUrl: pickFirstString(data.previewUrl, data.previewPath, output.previewUrl, output.previewPath),
-    hdUrl: pickFirstString(data.hdUrl, data.resultUrl, data.hdPath, output.hdUrl, output.resultUrl, output.hdPath),
-    printUrl: pickFirstString(data.printUrl, output.printUrl),
+    previewUrl: pickOutputPath(
+      data.previewUrl,
+      data.previewPath,
+      data.preview,
+      output.previewUrl,
+      output.previewPath,
+      output.preview,
+      files.preview,
+      files.low,
+      files.standard
+    ),
+    hdUrl: pickOutputPath(
+      data.hdUrl,
+      data.resultUrl,
+      data.hdPath,
+      data.outputUrl,
+      data.outputPath,
+      data.imageUrl,
+      data.imagePath,
+      output.hdUrl,
+      output.resultUrl,
+      output.hdPath,
+      output.outputUrl,
+      output.outputPath,
+      output.imageUrl,
+      output.imagePath,
+      output.hd,
+      output.result,
+      files.hd,
+      files.result,
+      files.output,
+      files.image
+    ),
+    printUrl: pickOutputPath(data.printUrl, output.printUrl, files.print),
     backgroundColor: pickFirstString(data.backgroundColor, output.backgroundColor),
     widthMm: pickFirstNumber(data.widthMm, size.widthMm, data.width, size.width),
     heightMm: pickFirstNumber(data.heightMm, size.heightMm, data.height, size.height),
@@ -271,28 +316,24 @@ function mapToolSpecs({ colorsResponse, photoSizesResponse, fallbackSpecs }) {
   };
 }
 
-function buildGeneratePhotoPayload({ imageId, storedImagePath, sizeCode, backgroundColor, enhance, sizeDefinition }) {
+function buildGeneratePhotoPayload({ storedImagePath, sizeCode, backgroundColor, enhance, sizeDefinition }) {
   const sourceType = pickFirstString(sizeDefinition?.sourceType, DEFAULT_SIZE_SOURCE_TYPE) || DEFAULT_SIZE_SOURCE_TYPE;
-  const sceneKey = pickFirstString(sizeDefinition?.sceneKey, sizeDefinition?.sizeCode, sizeCode);
   const payload = {
-    imageId,
-    sourceType,
-    sceneKey: sourceType === TOOL_SOURCE_TYPES.SCENE ? sceneKey : null,
-    customWidthMm: sourceType === TOOL_SOURCE_TYPES.CUSTOM ? pickFirstNumber(sizeDefinition?.widthMm) : null,
-    customHeightMm: sourceType === TOOL_SOURCE_TYPES.CUSTOM ? pickFirstNumber(sizeDefinition?.heightMm) : null,
+    imagePath: storedImagePath,
+    sizeKey: pickFirstString(sizeDefinition?.sizeCode, sizeCode),
+    sceneId: sourceType === TOOL_SOURCE_TYPES.SCENE ? pickFirstString(sizeDefinition?.sceneKey) : null,
     backgroundColor,
-    beautyEnabled: !!enhance,
-    printLayoutType: pickFirstString(sizeDefinition?.paper, DEFAULT_PRINT_LAYOUT),
-    originalImagePath: storedImagePath
+    enhance: !!enhance,
+    saveOutput: true,
+    paper: pickFirstString(sizeDefinition?.paper, DEFAULT_PRINT_LAYOUT)
   };
 
-  if (payload.sourceType !== TOOL_SOURCE_TYPES.CUSTOM) {
-    delete payload.customWidthMm;
-    delete payload.customHeightMm;
+  if (!payload.sceneId) {
+    delete payload.sceneId;
   }
 
-  if (!payload.printLayoutType) {
-    delete payload.printLayoutType;
+  if (!payload.paper) {
+    delete payload.paper;
   }
 
   return payload;

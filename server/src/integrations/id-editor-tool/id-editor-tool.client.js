@@ -2,6 +2,32 @@ const appConfig = require('../../config/app.config');
 const logger = require('../../utils/logger');
 const { IdEditorToolError, TOOL_ERROR_TYPES } = require('./id-editor-tool.types');
 
+function isFormDataBody(body) {
+  return typeof FormData !== 'undefined' && body instanceof FormData;
+}
+
+function appendFormValue(form, key, value) {
+  if (value === undefined || value === null || value === '') return;
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => appendFormValue(form, key, item));
+    return;
+  }
+
+  if (typeof value === 'boolean') {
+    form.append(key, value ? 'true' : 'false');
+    return;
+  }
+
+  form.append(key, String(value));
+}
+
+function buildFormData(payload = {}) {
+  const form = new FormData();
+  Object.entries(payload).forEach(([key, value]) => appendFormValue(form, key, value));
+  return form;
+}
+
 class IdEditorToolClient {
   constructor() {
     this.baseUrl = String(appConfig.idEditorToolBaseUrl || '').replace(/\/$/, '');
@@ -13,32 +39,24 @@ class IdEditorToolClient {
     return this.request('/health', { method: 'GET' });
   }
 
-  async getAvailableColors() {
-    return this.request('/ai/colors', { method: 'GET' });
-  }
-
-  async getPhotoSizes() {
-    return this.request('/ai/photo-sizes', { method: 'GET' });
-  }
-
   async detectPhoto(payload) {
-    return this.request('/ai/detect', {
+    return this.request('/detect', {
       method: 'POST',
-      body: payload
+      body: buildFormData(payload)
     });
   }
 
   async generatePhoto(payload) {
-    return this.request('/ai/generate-id-photo', {
+    return this.request('/generate', {
       method: 'POST',
-      body: payload
+      body: buildFormData(payload)
     });
   }
 
   async generatePrintLayout(payload) {
-    return this.request('/ai/generate-print-layout', {
+    return this.request('/layout', {
       method: 'POST',
-      body: payload
+      body: buildFormData(payload)
     });
   }
 
@@ -59,8 +77,12 @@ class IdEditorToolClient {
 
     let requestBody;
     if (body !== undefined && body !== null) {
-      headers['Content-Type'] = 'application/json';
-      requestBody = JSON.stringify(body);
+      if (isFormDataBody(body)) {
+        requestBody = body;
+      } else {
+        headers['Content-Type'] = 'application/json';
+        requestBody = JSON.stringify(body);
+      }
     }
 
     try {

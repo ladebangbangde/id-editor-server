@@ -8,7 +8,6 @@ const {
   mapToolErrorToBusiness,
   mapToolDetectResult,
   mapToolGenerateResult,
-  mapToolSpecs,
   buildQualitySummary,
   buildGeneratePhotoPayload
 } = require('../../integrations/id-editor-tool/id-editor-tool.mapper');
@@ -52,27 +51,7 @@ function assertDetectResult(detectResult) {
 }
 
 async function loadRuntimeSpecs() {
-  const fallbackSpecs = getPhotoSpecs();
-
-  try {
-    const [colorsResponse, photoSizesResponse] = await Promise.all([
-      idEditorToolClient.getAvailableColors(),
-      idEditorToolClient.getPhotoSizes()
-    ]);
-
-    return mergeSpecs(mapToolSpecs({
-      colorsResponse,
-      photoSizesResponse,
-      fallbackSpecs
-    }));
-  } catch (error) {
-    logger.warn('photo specs fallback to static defaults', {
-      toolCode: error.toolCode || null,
-      message: error.toolMessage || error.message
-    });
-
-    return fallbackSpecs;
-  }
+  return getPhotoSpecs();
 }
 
 module.exports = {
@@ -129,15 +108,14 @@ module.exports = {
         quality_message: '图片检测中'
       });
 
-      const detectResponse = await idEditorToolClient.detectPhoto({
-        imageId: localTaskId,
-        originalImagePath: toolFilePath
-      });
+      const detectRequestPayload = {
+        imagePath: toolFilePath
+      };
+      const detectResponse = await idEditorToolClient.detectPhoto(detectRequestPayload);
       const detectResult = mapToolDetectResult(detectResponse);
       assertDetectResult(detectResult);
 
       const toolRequestPayload = buildGeneratePhotoPayload({
-        imageId: localTaskId,
         storedImagePath: toolFilePath,
         sizeCode: requestPayload.sizeCode,
         backgroundColor: requestPayload.backgroundColor,
@@ -151,6 +129,8 @@ module.exports = {
         quality_message: '证件照生成中',
         request_payload: {
           clientRequest: requestPayload,
+          toolFilePath,
+          detectRequest: detectRequestPayload,
           toolRequest: toolRequestPayload
         }
       });
