@@ -1,6 +1,5 @@
 require('dotenv').config();
 const express = require('express');
-const path = require('path');
 const cors = require('cors');
 const morgan = require('morgan');
 const appConfig = require('./config/app.config');
@@ -16,7 +15,7 @@ app.use(cors());
 app.use(morgan('combined'));
 app.use(express.json({ limit: '2mb' }));
 app.get('/health', (_req, res) => res.status(200).json({ status: 'ok' }));
-app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+app.use('/uploads', express.static(appConfig.uploadDir));
 app.use(appConfig.apiPrefix, auth);
 app.use(`${appConfig.apiPrefix}/auth`, require('./routes/auth.routes'));
 app.use(`${appConfig.apiPrefix}/home`, require('./routes/home.routes'));

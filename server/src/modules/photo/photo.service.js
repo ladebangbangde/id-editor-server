@@ -14,6 +14,7 @@ const {
 } = require('../../integrations/id-editor-tool/id-editor-tool.mapper');
 const photoRepository = require('./photo.repository');
 const { getPhotoSpecs, mergeSpecs, validateProcessPhotoPayload } = require('./dto/process-photo.dto');
+const { toToolSharedAbsolutePath } = require('../../utils/file-helper');
 
 function buildAbsoluteUrl(urlPath) {
   if (!urlPath) return null;
@@ -21,13 +22,9 @@ function buildAbsoluteUrl(urlPath) {
   return new URL(urlPath.startsWith('/') ? urlPath : `/${urlPath}`, `${appConfig.baseUrl}/`).toString();
 }
 
-function buildStoredImagePath(filePath) {
+function buildToolFilePath(filePath) {
   if (!filePath) return null;
-  const relativeToUploadDir = path.relative(appConfig.uploadDir, filePath).replace(/\\/g, '/');
-  if (relativeToUploadDir && !relativeToUploadDir.startsWith('..')) {
-    return `uploads/${relativeToUploadDir}`;
-  }
-  return `uploads/original/${path.basename(filePath)}`;
+  return toToolSharedAbsolutePath(filePath);
 }
 
 function serializeToolError(error) {
@@ -106,7 +103,7 @@ module.exports = {
     const mergedSpecs = validation.specs || mergeSpecs(specs);
     const selectedSizeDefinition = mergedSpecs.sizeDefinitions.find((item) => item.sizeCode === requestPayload.sizeCode) || null;
     const sourceUrl = buildAbsoluteUrl(`/uploads/original/${path.basename(file.path)}`);
-    const storedImagePath = buildStoredImagePath(file.path);
+    const toolFilePath = buildToolFilePath(file.path);
     const localTaskId = `photo_${uuidv4().replace(/-/g, '')}`;
 
     const taskRecord = await photoRepository.create({
@@ -121,7 +118,7 @@ module.exports = {
       quality_message: '任务处理中',
       request_payload: {
         clientRequest: requestPayload,
-        storedImagePath
+        toolFilePath
       }
     });
 
@@ -134,14 +131,14 @@ module.exports = {
 
       const detectResponse = await idEditorToolClient.detectPhoto({
         imageId: localTaskId,
-        originalImagePath: storedImagePath
+        originalImagePath: toolFilePath
       });
       const detectResult = mapToolDetectResult(detectResponse);
       assertDetectResult(detectResult);
 
       const toolRequestPayload = buildGeneratePhotoPayload({
         imageId: localTaskId,
-        storedImagePath,
+        storedImagePath: toolFilePath,
         sizeCode: requestPayload.sizeCode,
         backgroundColor: requestPayload.backgroundColor,
         enhance: requestPayload.enhance,
