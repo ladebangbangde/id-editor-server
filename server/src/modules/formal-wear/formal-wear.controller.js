@@ -9,10 +9,25 @@ const asyncHandler = (handler) => async (req, res, next) => {
   }
 };
 
+function pickUploadedFile(req) {
+  if (req.file) return req.file;
+
+  const files = Array.isArray(req.files) ? req.files : [];
+  if (files.length === 0) return null;
+
+  const preferredFields = ['file', 'image', 'photo', 'source', 'sourceFile', 'originFile'];
+  for (const fieldName of preferredFields) {
+    const matched = files.find((item) => item && item.fieldname === fieldName);
+    if (matched) return matched;
+  }
+
+  return files[0] || null;
+}
+
 const handleCreateTask = asyncHandler(async (req, res) => {
   const result = await formalWearService.processFormalWear({
     user: req.user,
-    file: req.file,
+    file: pickUploadedFile(req),
     payload: req.body
   });
 

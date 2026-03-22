@@ -32,4 +32,4 @@ Base URL: `/api`
 - `/home/config` continues to return the same top-level structure with `mainCards` and `quickEntries`; current product semantics keep only one quick entry: `换装`, while preserving the existing top-level structure and jump semantics.
 - `/home/templates` remains available and keeps the `tabs + templates` response structure for front-end local filtering.
 
-- `/formal-wear/tasks` accepts multipart form-data with `file`, `gender`, `style`, `color`, and `enhance`, and returns unified formal-wear task fields for direct front-end consumption. `/formal-wear/process` is kept as a compatibility alias.
+- `/formal-wear/tasks` accepts multipart form-data and is tolerant of common front-end upload field names; it normalizes `gender/style/color` common aliases and treats missing `enhance` as `false`. `/formal-wear/process` is kept as a compatibility alias.
