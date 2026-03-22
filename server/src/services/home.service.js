@@ -26,9 +26,10 @@ const HOME_CONFIG = {
   quickEntries: [
     {
       key: 'dress',
-      title: '智能换正装',
+      title: '换装',
+      subtitle: '快捷进入证件照换装',
       icon: 'dress',
-      // 首页保留该快捷入口用于前端产品引导；本次仅调整配置语义，不新增真实换装后端接口。
+      // 首页快捷功能收敛为“换装”，继续复用既有跳转与返回结构，避免影响现有联调。
       actionPath: '/pages/change-dress/index'
     }
   ]

@@ -25,5 +25,5 @@ Base URL: `/api`
 
 ## Notes
 
-- `/home/config` continues to return the same top-level structure with `mainCards` and `quickEntries`; current product semantics keep only one quick entry: `智能换正装`.
+- `/home/config` continues to return the same top-level structure with `mainCards` and `quickEntries`; current product semantics keep only one quick entry: `换装`, while preserving the existing top-level structure and jump semantics.
 - `/home/templates` remains available and keeps the `tabs + templates` response structure for front-end local filtering.
