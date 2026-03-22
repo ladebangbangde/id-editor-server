@@ -22,3 +22,8 @@ Base URL: `/api`
 - GET `/download/:resultId/hd`
 - GET `/download/:resultId/print`
 - GET `/admin/stats`
+
+## Notes
+
+- `/home/config` continues to return the same top-level structure with `mainCards` and `quickEntries`; current product semantics keep only one quick entry: `智能换正装`.
+- `/home/templates` remains available and keeps the `tabs + templates` response structure for front-end local filtering.

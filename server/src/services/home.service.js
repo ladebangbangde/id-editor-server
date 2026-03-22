@@ -25,28 +25,11 @@ const HOME_CONFIG = {
   ],
   quickEntries: [
     {
-      key: 'custom',
-      title: '自定义像素',
-      icon: 'custom',
-      actionPath: '/pages/custom-size/index'
-    },
-    {
       key: 'dress',
       title: '智能换正装',
       icon: 'dress',
+      // 首页保留该快捷入口用于前端产品引导；本次仅调整配置语义，不新增真实换装后端接口。
       actionPath: '/pages/change-dress/index'
-    },
-    {
-      key: 'vip',
-      title: '高端定制',
-      icon: 'vip',
-      actionPath: '/pages/premium/index'
-    },
-    {
-      key: 'receipt',
-      title: '回执办理',
-      icon: 'receipt',
-      actionPath: '/pages/receipt/index'
     }
   ]
 };
