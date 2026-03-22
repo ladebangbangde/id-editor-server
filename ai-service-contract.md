@@ -1,91 +1,127 @@
-# AI Service Interface Contract
+# Python 图片处理服务对接契约（最新版）
+
+> 本文档基于当前 `id-editor` 仓库实际代码整理，目标是让独立的 Python 图片处理项目可以直接按本文档接收“处理指令”、返回“处理结果”，从而无缝接入当前 Node.js 主业务后端。
+
+---
 
 ## 1. 文档目标
 
-本文档用于约束主业务后端（server）与 AI 图像处理服务（ai-service）之间的接口协议，确保两端在以下方面保持一致：
+当前 Node.js 服务已经对外暴露完整业务接口，但图像处理链路仍以内置模块方式执行。为了把图像处理能力迁移到独立 Python 项目，Python 服务需要遵守一套稳定、可替换、可扩展的 HTTP 接口契约。
 
-- API 路径
-- 请求字段
-- 返回字段
-- 错误处理
-- 文件输出规则
-- 字段命名规范
-- 结果数据映射关系
+本文档同时回答三个问题：
 
-AI 服务是下游服务，由主业务后端通过 HTTP 调用。前端不得直接调用 AI 服务。
+1. Node 主服务会在什么场景下向 Python 服务发起调用
+2. Python 服务需要接收哪些字段
+3. Python 服务必须返回哪些结果，才能让当前订单、历史、下载链路继续工作
 
 ---
 
-## 2. 调用关系
+## 2. 当前真实业务入口
 
-调用链路如下：
+前端/调用方当前只调用 Node 主服务，不直接调用 Python 服务。
 
-WeChat Mini Program -> server -> ai-service
+真实链路是：
 
-说明：
+```text
+Client / Mini Program / Web
+        ↓
+Node.js server
+        ↓
+Python image service
+```
 
-- 小程序只调用主业务后端 `server`
-- `server` 负责用户、订单、权限、历史记录
-- `ai-service` 只负责图像处理
-- `ai-service` 不负责支付、权限、下载控制
+在当前代码里，真正触发图像处理的上游接口是：
+
+- `POST /api/images/generate`
+
+因此，Python 服务的任务语义必须与这个接口保持一致。
 
 ---
 
-## 3. 基础约定
+## 3. Node 主服务当前使用到的处理步骤
 
-### 3.1 协议
-- HTTP / JSON
-- 编码：UTF-8
+Node 内置流水线 `generate-id-photo.js` 当前依次执行：
 
-### 3.2 AI 服务基础地址
+1. 人脸检测 `detect`
+2. 抠图分割 `segment`
+3. 背景替换 `replaceBackground`
+4. 尺寸裁剪 `cropToSpec`
+5. 图像增强 `enhance`
+6. 质量检查 `check`
+7. 预览图生成 `buildPreview`
+8. 可选排版图生成 `generatePrintLayout`
+
+因此，Python 服务有两种设计方式：
+
+### 方案 A：提供一个总控接口
+
+由 Python 服务一次性完成完整流程，Node 只调用一次。
+
+### 方案 B：提供多个细分接口
+
+由 Node 分步骤调用 Python 服务的多个能力接口。
+
+**推荐使用方案 A。**
+
+原因：
+
+- 更容易做超时控制与错误收敛
+- 更适合 Python 侧集中管理模型加载
+- 更方便后续切换异步队列/任务系统
+- 能减少 Node 与 Python 之间的网络往返次数
+
+下文以“推荐方案 A”为主，同时给出“兼容方案 B”。
+
+---
+
+## 4. 基础约定
+
+### 4.1 协议
+
+- HTTP/1.1 或 HTTP/2
+- `Content-Type: application/json`
+- 编码：`UTF-8`
+
+### 4.2 建议基础地址
+
 示例：
 
-`http://localhost:8000`
+- `http://127.0.0.1:8000`
 
-生产环境由配置项决定，例如：
+建议 Node 侧配置项：
 
-`AI_SERVICE_BASE_URL=http://127.0.0.1:8000`
+- `PY_IMAGE_SERVICE_BASE_URL=http://127.0.0.1:8000`
 
-### 3.3 Content-Type
-统一使用：
+### 4.3 统一字段命名
 
-`application/json`
-
----
-
-## 4. 字段命名规范
-
-所有字段统一使用 camelCase。
+**必须全部使用 camelCase。**
 
 例如：
 
-- imageId
-- sourceType
-- sceneKey
-- customWidthMm
-- customHeightMm
-- backgroundColor
-- beautyEnabled
-- printLayoutType
-- originalImagePath
-- previewUrl
-- hdUrl
-- printUrl
-- qualityStatus
+- `imageId`
+- `taskId`
+- `sourceType`
+- `sceneKey`
+- `customWidthMm`
+- `customHeightMm`
+- `backgroundColor`
+- `beautyEnabled`
+- `printLayoutType`
+- `originalImagePath`
+- `previewUrl`
+- `hdUrl`
+- `printUrl`
+- `qualityStatus`
 
-不得擅自改为：
+不要混用：
 
-- snake_case
-- kebab-case
-- 其他不一致命名
+- `snake_case`
+- `kebab-case`
 
----
+### 4.4 统一响应格式
 
-## 5. 统一返回格式
+#### 成功
 
-AI 服务所有接口都必须返回以下统一结构。
-
-### 成功
 ```json
 {
   "success": true,
@@ -94,7 +130,8 @@ AI 服务所有接口都必须返回以下统一结构。
 }
 ```
 
-### 失败
+#### 失败
+
 ```json
 {
   "success": false,
@@ -105,501 +142,479 @@ AI 服务所有接口都必须返回以下统一结构。
 
 说明：
 
-- `success` 只表示本次接口调用是否成功
-- 业务详细结果写在 `data`
-- 不允许返回不带 `success` 的结构
-- 不允许返回数组作为根节点
-- 不允许返回字段名不统一的结果
+- Python 服务不需要返回与 Node 一致的 `code: 0`
+- 但必须返回 `success`、`message`、`data`
+- HTTP 状态码需与错误语义一致
 
 ---
 
-## 6. 文件与路径约定
+## 5. 推荐接口设计（Python 服务）
 
-AI 服务生成的输出资源路径必须稳定，方便主业务后端写入数据库。
+Python 服务建议至少提供以下 4 个接口：
 
-### 6.1 输出目录
-- 预览图：`uploads/preview/`
-- 高清图：`uploads/hd/`
-- 排版图：`uploads/print/`
-- 临时文件：`uploads/temp/`
+1. `GET /health`
+2. `POST /v1/id-photo/generate`
+3. `POST /v1/print-layout/generate`
+4. `POST /v1/image/detect`
 
-### 6.2 文件命名规则
-必须基于 `imageId` 生成，保证可追踪性。
+其中：
 
-示例：
+- `POST /v1/id-photo/generate` 是最核心接口
+- 其余接口用于独立排版、调试与健康检查
 
-- `uploads/preview/img_001_preview.jpg`
-- `uploads/hd/img_001_hd.jpg`
-- `uploads/print/img_001_print_6.jpg`
-- `uploads/print/img_001_print_8.jpg`
-- `uploads/print/img_001_print_12.jpg`
+---
 
-### 6.3 路径字段说明
-AI 服务返回的路径字段可先返回相对路径，例如：
+## 6. 核心接口：生成证件照
+
+### 6.1 请求
+
+#### `POST /v1/id-photo/generate`
 
 ```json
 {
-  "previewUrl": "uploads/preview/img_001_preview.jpg"
+  "imageId": 123,
+  "taskId": 456,
+  "sourceType": "scene",
+  "sceneKey": "one_inch",
+  "customWidthMm": null,
+  "customHeightMm": null,
+  "targetWidthPx": 295,
+  "targetHeightPx": 413,
+  "backgroundColor": "white",
+  "beautyEnabled": true,
+  "printLayoutType": "eight",
+  "originalImagePath": "/workspace/id-editor/uploads/original/abc.jpg",
+  "outputDir": "/workspace/id-editor/uploads",
+  "needPreview": true,
+  "needHd": true,
+  "needPrint": true
 }
 ```
 
-由主业务后端决定是否转换成完整可访问 URL。
+### 6.2 字段说明
 
----
+- `imageId`：主服务图片 ID
+- `taskId`：主服务任务 ID，便于日志追踪
+- `sourceType`：`scene` 或 `custom`
+- `sceneKey`：场景模式下传入，例如 `one_inch`、`passport`、`driver_license`
+- `customWidthMm`：自定义模式宽度，单位 mm
+- `customHeightMm`：自定义模式高度，单位 mm
+- `targetWidthPx`：主服务已计算好的目标宽度，单位 px
+- `targetHeightPx`：主服务已计算好的目标高度，单位 px
+- `backgroundColor`：建议支持 `white`、`blue`、`red`
+- `beautyEnabled`：是否启用美化
+- `printLayoutType`：可选，`six`、`eight`、`twelve`
+- `originalImagePath`：原图绝对路径
+- `outputDir`：输出根目录
+- `needPreview`：是否生成预览图
+- `needHd`：是否生成高清图
+- `needPrint`：是否生成排版图
 
-## 7. 场景模板约定
+### 6.3 处理要求
 
-当 `sourceType = scene` 时，必须使用以下 `sceneKey` 之一：
+Python 服务至少需要完成这些动作：
 
-- `one_inch`
-- `two_inch`
-- `passport`
-- `visa`
-- `driver_license`
-- `resume`
-- `exam`
+1. 检测图片中是否存在有效人脸
+2. 完成人像主体分割/抠图
+3. 按背景色进行底色替换
+4. 按 `targetWidthPx` / `targetHeightPx` 输出标准尺寸照片
+5. 视情况进行美化/增强
+6. 生成预览图
+7. 根据 `printLayoutType` 生成排版图（可选）
+8. 输出质量检查结论
 
-### 7.1 说明
-- `sceneKey` 必须与主业务后端的 `scene_templates.scene_key` 保持一致
-- AI 服务内部不得随意改名
-- 若 `sceneKey` 无效，应返回错误
+### 6.4 成功响应
 
-### 7.2 自定义尺寸模式
-当 `sourceType = custom` 时：
-- `sceneKey` 可为空
-- 必须提供：
-  - `customWidthMm`
-  - `customHeightMm`
-
----
-
-## 8. 枚举值约定
-
-### 8.1 sourceType
-允许值：
-- `scene`
-- `custom`
-
-### 8.2 backgroundColor
-允许值：
-- `white`
-- `blue`
-- `red`
-
-### 8.3 printLayoutType
-允许值：
-- `six`
-- `eight`
-- `twelve`
-
-### 8.4 qualityStatus
-允许值：
-- `passed`
-- `warning`
-- `failed`
-
----
-
-## 9. AI 服务接口列表
-
-AI 服务必须提供以下接口：
-
-- `POST /ai/detect`
-- `POST /ai/generate-id-photo`
-- `POST /ai/generate-print-layout`
-- `GET /ai/health`
-
----
-
-## 10. 接口详细契约
-
-### 10.1 健康检查
-
-#### 请求
-`GET /ai/health`
-
-#### 返回
-```json
-{
-  "success": true,
-  "message": "AI service is running",
-  "data": {
-    "service": "ai-id-photo-service"
-  }
-}
-```
-
-#### 用途
-- `server` 启动后可用于检查 AI 服务是否可用
-- 可作为部署探活接口
-
----
-
-### 10.2 照片检测接口
-
-#### 请求
-`POST /ai/detect`
-
-#### 请求体
-```json
-{
-  "imageId": "img_001",
-  "originalImagePath": "uploads/original/img_001.jpg"
-}
-```
-
-#### 字段说明
-- `imageId`：图片唯一标识，由主业务后端生成
-- `originalImagePath`：原图文件路径
-
-#### 成功返回
 ```json
 {
   "success": true,
   "message": "OK",
   "data": {
-    "imageId": "img_001",
+    "previewUrl": "/uploads/preview/123_preview.jpg",
+    "hdUrl": "/uploads/hd/123_hd.jpg",
+    "printUrl": "/uploads/print/123_print_8.jpg",
+    "previewPath": "/workspace/id-editor/uploads/preview/123_preview.jpg",
+    "hdPath": "/workspace/id-editor/uploads/hd/123_hd.jpg",
+    "printPath": "/workspace/id-editor/uploads/print/123_print_8.jpg",
+    "qualityStatus": "passed",
+    "qualityScore": 92,
+    "issues": [],
+    "faceDetected": true,
+    "faceCount": 1,
+    "generatedAt": "2026-03-18T00:00:00.000Z"
+  }
+}
+```
+
+### 6.5 响应字段要求
+
+下列字段是 **Node 主服务最需要的最小返回集**：
+
+- `previewUrl`
+- `hdUrl`
+- `qualityStatus`
+
+下列字段是 **强烈建议返回**：
+
+- `printUrl`
+- `previewPath`
+- `hdPath`
+- `printPath`
+- `qualityScore`
+- `issues`
+- `generatedAt`
+
+### 6.6 qualityStatus 枚举
+
+建议固定为：
+
+- `passed`
+- `warning`
+- `failed`
+
+当前 Node 代码只显式使用了：
+
+- `passed`
+- `failed`
+
+但为后续扩展，建议 Python 服务保留 `warning`。
+
+### 6.7 失败响应示例
+
+#### 无人脸
+
+```json
+{
+  "success": false,
+  "message": "No valid face detected",
+  "data": {
+    "reason": "NO_FACE"
+  }
+}
+```
+
+#### 多人脸
+
+```json
+{
+  "success": false,
+  "message": "Multiple faces detected",
+  "data": {
+    "reason": "MULTIPLE_FACES",
+    "faceCount": 2
+  }
+}
+```
+
+#### 图像质量不合格
+
+```json
+{
+  "success": false,
+  "message": "Image quality check failed",
+  "data": {
+    "reason": "QUALITY_FAILED",
+    "issues": ["blur", "bad_exposure"]
+  }
+}
+```
+
+---
+
+## 7. 排版图接口（可独立调用）
+
+### `POST /v1/print-layout/generate`
+
+```json
+{
+  "imageId": 123,
+  "hdImagePath": "/workspace/id-editor/uploads/hd/123_hd.jpg",
+  "printLayoutType": "eight",
+  "outputDir": "/workspace/id-editor/uploads"
+}
+```
+
+### 成功响应
+
+```json
+{
+  "success": true,
+  "message": "OK",
+  "data": {
+    "printUrl": "/uploads/print/123_print_8.jpg",
+    "printPath": "/workspace/id-editor/uploads/print/123_print_8.jpg",
+    "count": 8
+  }
+}
+```
+
+### `printLayoutType` 枚举
+
+- `six`
+- `eight`
+- `twelve`
+
+当前 Node 侧映射关系：
+
+- `six` -> 6 张
+- `eight` -> 8 张
+- `twelve` -> 12 张
+
+---
+
+## 8. 检测接口（调试/预检查）
+
+### `POST /v1/image/detect`
+
+```json
+{
+  "imageId": 123,
+  "originalImagePath": "/workspace/id-editor/uploads/original/abc.jpg"
+}
+```
+
+### 成功响应
+
+```json
+{
+  "success": true,
+  "message": "OK",
+  "data": {
     "hasFace": true,
     "faceCount": 1,
-    "blurScore": 0.91,
+    "faceBox": {
+      "x": 100,
+      "y": 80,
+      "width": 320,
+      "height": 420
+    },
     "poseValid": true,
-    "occlusionDetected": false,
-    "message": "照片可用于制作证件照"
+    "blurScore": 0.1,
+    "occlusionDetected": false
   }
-}
-```
-
-#### data 字段说明
-- `imageId`：请求中的 imageId 原样返回
-- `hasFace`：是否检测到人脸
-- `faceCount`：人脸数量
-- `blurScore`：模糊评分，0~1 或其他固定规则
-- `poseValid`：姿态是否合理
-- `occlusionDetected`：是否存在明显遮挡
-- `message`：检测说明，供主业务后端记录或提示用户
-
-#### 失败返回示例
-```json
-{
-  "success": false,
-  "message": "Image not found",
-  "data": null
 }
 ```
 
 ---
 
-### 10.3 生成证件照接口
+## 9. 健康检查接口
 
-#### 请求
-`POST /ai/generate-id-photo`
+### `GET /health`
 
-#### 请求体
-```json
-{
-  "imageId": "img_001",
-  "sourceType": "scene",
-  "sceneKey": "passport",
-  "customWidthMm": null,
-  "customHeightMm": null,
-  "backgroundColor": "white",
-  "beautyEnabled": false,
-  "printLayoutType": "six",
-  "originalImagePath": "uploads/original/img_001.jpg"
-}
-```
-
-#### 字段说明
-- `imageId`：图片唯一标识
-- `sourceType`：`scene` 或 `custom`
-- `sceneKey`：固定场景模板 key，`sourceType=scene` 时必填
-- `customWidthMm`：自定义宽度，`sourceType=custom` 时必填
-- `customHeightMm`：自定义高度，`sourceType=custom` 时必填
-- `backgroundColor`：背景颜色
-- `beautyEnabled`：是否开启轻量增强
-- `printLayoutType`：排版类型，可为空
-- `originalImagePath`：原图路径
-
-#### 成功返回
 ```json
 {
   "success": true,
-  "message": "Generate success",
+  "message": "Python image service is running",
   "data": {
-    "imageId": "img_001",
-    "previewUrl": "uploads/preview/img_001_preview.jpg",
-    "hdUrl": "uploads/hd/img_001_hd.jpg",
-    "printUrl": "uploads/print/img_001_print_6.jpg",
-    "backgroundColor": "white",
-    "widthMm": 33,
-    "heightMm": 48,
-    "pixelWidth": 413,
-    "pixelHeight": 579,
-    "qualityStatus": "passed"
+    "service": "python-image-service"
   }
 }
 ```
 
-#### data 字段说明
-- `imageId`：请求中的 imageId 原样返回
-- `previewUrl`：预览图路径，必须返回
-- `hdUrl`：高清图路径，必须返回
-- `printUrl`：排版图路径，可为空
-- `backgroundColor`：最终背景色
-- `widthMm`：最终宽度（毫米）
-- `heightMm`：最终高度（毫米）
-- `pixelWidth`：最终像素宽度
-- `pixelHeight`：最终像素高度
-- `qualityStatus`：质量状态，枚举值 `passed | warning | failed`
+---
 
-#### 说明
-该返回结构必须可被主业务后端直接映射到 `image_results` 表。
+## 10. 输出文件约定
 
-#### image_results 映射建议
-- `preview_url <- previewUrl`
-- `hd_url <- hdUrl`
-- `print_url <- printUrl`
-- `background_color <- backgroundColor`
-- `width_mm <- widthMm`
-- `height_mm <- heightMm`
-- `pixel_width <- pixelWidth`
-- `pixel_height <- pixelHeight`
-- `quality_status <- qualityStatus`
+为了兼容当前 Node 主服务的静态资源挂载方式，建议 Python 服务直接把文件输出到 Node 服务使用的 `uploads/` 目录下。
 
-#### 失败返回示例
+### 10.1 目录约定
+
+- 原图：`uploads/original/`
+- 预览图：`uploads/preview/`
+- 高清图：`uploads/hd/`
+- 排版图：`uploads/print/`
+- 临时文件：`uploads/temp/`
+
+### 10.2 URL 约定
+
+Python 服务返回给 Node 的 URL 建议使用：
+
+- `\` 不允许出现，统一使用 `/`
+- 建议返回站点相对路径，例如：
+  - `/uploads/preview/123_preview.jpg`
+  - `/uploads/hd/123_hd.jpg`
+  - `/uploads/print/123_print_8.jpg`
+
+这样 Node 可以直接入库，不必再次转换。
+
+### 10.3 文件命名建议
+
+建议至少包含以下信息：
+
+- `imageId`
+- 输出类型
+- 可选布局张数
+- 时间戳或随机串
+
+例如：
+
+- `123_preview_20260318.jpg`
+- `123_hd_20260318.jpg`
+- `123_print_8_20260318.jpg`
+
+---
+
+## 11. 与当前 Node 主服务字段映射关系
+
+Python 服务返回后，Node 主服务最终需要写入 `image_results` 的字段包括：
+
+- `preview_url`
+- `hd_url`
+- `print_url`
+- `background_color`
+- `width_mm`
+- `height_mm`
+- `pixel_width`
+- `pixel_height`
+- `quality_status`
+
+因此 Python 服务返回体至少要能支撑如下映射：
+
+| Python 返回字段 | Node 入库字段 | 必需 |
+|---|---|---|
+| `previewUrl` | `preview_url` | 是 |
+| `hdUrl` | `hd_url` | 是 |
+| `printUrl` | `print_url` | 否 |
+| `qualityStatus` | `quality_status` | 是 |
+
+---
+
+## 12. Node 到 Python 的实际指令来源
+
+Node 主服务当前在处理 `POST /api/images/generate` 时，实际会从业务层整理出这些语义：
+
+### 场景模式
+
 ```json
 {
-  "success": false,
-  "message": "Invalid sceneKey",
-  "data": null
-}
-```
-
----
-
-### 10.4 生成排版图接口
-
-#### 请求
-`POST /ai/generate-print-layout`
-
-#### 请求体
-```json
-{
-  "imageId": "img_001",
-  "hdImagePath": "uploads/hd/img_001_hd.jpg",
-  "layoutType": "six"
-}
-```
-
-#### 字段说明
-- `imageId`：图片唯一标识
-- `hdImagePath`：高清图路径
-- `layoutType`：排版类型，`six | eight | twelve`
-
-#### 成功返回
-```json
-{
-  "success": true,
-  "message": "Generate print layout success",
-  "data": {
-    "imageId": "img_001",
-    "layoutType": "six",
-    "printUrl": "uploads/print/img_001_print_6.jpg"
-  }
-}
-```
-
-#### 失败返回示例
-```json
-{
-  "success": false,
-  "message": "Invalid layoutType",
-  "data": null
-}
-```
-
----
-
-## 11. 错误码与错误语义建议
-
-当前第一版可不强制单独 errorCode 字段，但建议 message 稳定且可识别。
-
-常见错误语义：
-
-- `Image not found`
-- `Invalid sourceType`
-- `Invalid sceneKey`
-- `Invalid backgroundColor`
-- `Invalid custom size`
-- `Invalid layoutType`
-- `Face not detected`
-- `Multiple faces detected`
-- `Image quality too low`
-- `Failed to segment portrait`
-- `Failed to generate id photo`
-- `Failed to generate print layout`
-
-如果后续要扩展 `errorCode`，建议在不破坏当前返回结构前提下增加。
-
----
-
-## 12. server 侧调用建议
-
-### 12.1 推荐封装方式
-主业务后端应封装统一 AI Client，例如：
-
-- `detectPhoto(payload)`
-- `generateIdPhoto(payload)`
-- `generatePrintLayout(payload)`
-- `checkAiHealth()`
-
-### 12.2 调用失败处理
-若 AI 服务：
-- 超时
-- 返回 success=false
-- 返回字段不完整
-
-则 `server` 应：
-- 标记任务失败
-- 记录错误日志
-- 返回前端统一错误提示
-
-### 12.3 超时建议
-- detect：3~5 秒
-- generate-id-photo：10~20 秒
-- generate-print-layout：5~10 秒
-
----
-
-## 13. server 侧任务与结果处理建议
-
-### 13.1 generate-id-photo 调用成功后
-主业务后端应：
-1. 更新 `image_tasks.status = success`
-2. 写入或更新 `image_results`
-3. 将返回结果传给前端或供历史记录查询
-
-### 13.2 generate-id-photo 调用失败后
-主业务后端应：
-1. 更新 `image_tasks.status = failed`
-2. 写入 `error_message`
-3. 不写入无效结果记录
-
----
-
-## 14. AI 服务边界说明
-
-AI 服务绝对不负责：
-
-- 用户鉴权
-- 订单创建
-- 支付回调
-- 下载权限判断
-- 是否允许查看高清图
-- 历史记录查询
-- 管理后台统计
-
-这些全部由 `server` 负责。
-
-AI 服务只负责：
-
-- 检测
-- 抠图
-- 换底
-- 裁剪
-- 增强
-- 排版
-- 输出结果文件
-
----
-
-## 15. 版本兼容要求
-
-第一版上线后，以下内容应尽量保持兼容，不要随意改动：
-
-- API 路径
-- 字段名
-- 返回结构
-- 场景模板 key
-- 背景色枚举
-- 排版类型枚举
-- 输出文件命名规则
-
-如果必须变更，应先更新本契约文档，并同步修改：
-
-- server
-- ai-service
-- 数据库存储映射逻辑
-
----
-
-## 16. 推荐联调顺序
-
-1. `GET /ai/health`
-2. `POST /ai/detect`
-3. `POST /ai/generate-id-photo`
-4. `POST /ai/generate-print-layout`
-
-建议先用固定模板场景联调：
-
-- `passport`
-- `visa`
-- `driver_license`
-
-再测试自定义尺寸：
-
-- `sourceType=custom`
-
----
-
-## 17. 联调最小样例
-
-### 检测请求
-```json
-{
-  "imageId": "img_demo_001",
-  "originalImagePath": "uploads/original/img_demo_001.jpg"
-}
-```
-
-### 生成请求（固定场景）
-```json
-{
-  "imageId": "img_demo_001",
+  "imageId": 123,
   "sourceType": "scene",
-  "sceneKey": "passport",
-  "customWidthMm": null,
-  "customHeightMm": null,
+  "sceneKey": "one_inch",
   "backgroundColor": "white",
-  "beautyEnabled": false,
-  "printLayoutType": "six",
-  "originalImagePath": "uploads/original/img_demo_001.jpg"
+  "beautyEnabled": true,
+  "printLayoutType": "eight"
 }
 ```
 
-### 生成请求（自定义尺寸）
+Node 会再自行补齐：
+
+- `originalImagePath`
+- `targetWidthPx`
+- `targetHeightPx`
+- `taskId`
+- 输出目录信息
+
+### 自定义模式
+
 ```json
 {
-  "imageId": "img_demo_002",
+  "imageId": 123,
   "sourceType": "custom",
-  "sceneKey": null,
-  "customWidthMm": 35,
-  "customHeightMm": 45,
+  "customWidthMm": 25,
+  "customHeightMm": 35,
   "backgroundColor": "blue",
-  "beautyEnabled": false,
-  "printLayoutType": "eight",
-  "originalImagePath": "uploads/original/img_demo_002.jpg"
+  "beautyEnabled": false
 }
 ```
 
 ---
 
-## 18. 最终原则
+## 13. 推荐错误码语义
 
-本契约优先级高于 AI 服务内部实现偏好。
+虽然当前 Node 内置实现主要依赖 HTTP 状态码，但 Python 服务建议额外在 `data.reason` 中返回稳定错误原因，便于 Node 后续映射业务提示。
 
-也就是说：
+建议值：
 
-- AI 服务必须服从 server 的字段与返回结构约定
-- 不允许 AI 服务为了“更优雅”而擅自修改契约
-- 所有变更必须先改契约，再改代码
+- `NO_FACE`
+- `MULTIPLE_FACES`
+- `FACE_TOO_SMALL`
+- `BAD_POSE`
+- `BAD_EXPOSURE`
+- `QUALITY_FAILED`
+- `UNSUPPORTED_BACKGROUND`
+- `INVALID_LAYOUT_TYPE`
+- `FILE_NOT_FOUND`
+- `MODEL_ERROR`
+- `INTERNAL_ERROR`
+
+---
+
+## 14. 兼容方案 B：细分能力接口
+
+如果 Python 项目更适合拆分实现，也可以提供以下细分接口，并由 Node 逐步调用：
+
+- `POST /v1/detect`
+- `POST /v1/segment`
+- `POST /v1/background/replace`
+- `POST /v1/crop`
+- `POST /v1/enhance`
+- `POST /v1/quality-check`
+- `POST /v1/print-layout/generate`
+
+但请注意：
+
+- 这会增加链路复杂度
+- Node 侧也需要改造更多逻辑
+- 不如总控接口易于维护
+
+因此仍然推荐优先交付：
+
+- `POST /v1/id-photo/generate`
+
+---
+
+## 15. Python 项目落地建议
+
+如果你要把本文档直接发给 Python 图片处理项目，可以把任务拆成下面几个里程碑：
+
+### 第一阶段：最小可用版本
+
+实现：
+
+- `GET /health`
+- `POST /v1/id-photo/generate`
+
+至少支持：
+
+- 单人脸检测
+- 换白/蓝/红底
+- 输出标准尺寸高清图
+- 输出预览图
+- 返回 `qualityStatus`
+
+### 第二阶段：增强能力
+
+补齐：
+
+- `printLayoutType`
+- 更精确的人像裁切
+- 质量评分与问题列表
+- 美颜/锐化开关
+
+### 第三阶段：生产化能力
+
+补齐：
+
+- 异步任务队列
+- 模型预热
+- 批量处理
+- Prometheus 指标
+- Trace ID / taskId 全链路日志
+
+---
+
+## 16. 结论
+
+对于当前 `id-editor` 仓库，**真正需要 Python 项目兼容的核心指令入口只有一个：**
+
+- `POST /v1/id-photo/generate`
+
+它必须严格承接 Node `POST /api/images/generate` 的语义，并稳定返回：
+
+- `previewUrl`
+- `hdUrl`
+- `printUrl`（按需）
+- `qualityStatus`
+
+只要这组契约稳定，当前上传、历史、订单、支付、下载接口都可以继续沿用，无需前端改动。
+
