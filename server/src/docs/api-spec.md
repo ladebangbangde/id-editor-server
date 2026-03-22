@@ -12,6 +12,7 @@ Base URL: `/api`
 - GET `/auth/me`
 - POST `/upload`
 - POST `/images/generate`
+- POST `/formal-wear/tasks`
 - POST `/formal-wear/process`
 - GET `/formal-wear/history?page=1&pageSize=10`
 - GET `/formal-wear/tasks/:taskId`
@@ -31,4 +32,4 @@ Base URL: `/api`
 - `/home/config` continues to return the same top-level structure with `mainCards` and `quickEntries`; current product semantics keep only one quick entry: `换装`, while preserving the existing top-level structure and jump semantics.
 - `/home/templates` remains available and keeps the `tabs + templates` response structure for front-end local filtering.
 
-- `/formal-wear/process` accepts multipart form-data with `file`, `gender`, `style`, `color`, and `enhance`, and returns unified formal-wear task fields for direct front-end consumption.
+- `/formal-wear/tasks` accepts multipart form-data with `file`, `gender`, `style`, `color`, and `enhance`, and returns unified formal-wear task fields for direct front-end consumption. `/formal-wear/process` is kept as a compatibility alias.
