@@ -53,6 +53,13 @@ class IdEditorToolClient {
     });
   }
 
+  async generateFormalWear(payload) {
+    return this.request('/formal-wear', {
+      method: 'POST',
+      body: buildFormData(payload)
+    });
+  }
+
   async generatePrintLayout(payload) {
     return this.request('/layout', {
       method: 'POST',

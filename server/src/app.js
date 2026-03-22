@@ -28,6 +28,7 @@ app.use(`${appConfig.apiPrefix}/orders`, require('./routes/order.routes'));
 app.use(`${appConfig.apiPrefix}/download`, require('./routes/download.routes'));
 app.use(`${appConfig.apiPrefix}/admin`, require('./routes/admin.routes'));
 app.use(`${appConfig.apiPrefix}/photo`, require('./routes/photo.routes'));
+app.use(`${appConfig.apiPrefix}/formal-wear`, require('./routes/formal-wear.routes'));
 app.use(errorHandler);
 
 module.exports = app;
