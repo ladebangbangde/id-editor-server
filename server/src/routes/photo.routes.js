@@ -4,6 +4,7 @@ const controller = require('../modules/photo/photo.controller');
 
 router.get('/specs', controller.specs);
 router.post('/process', upload.single('file'), controller.process);
+router.get('/history', controller.history);
 router.get('/tasks/:taskId', controller.taskDetail);
 
 module.exports = router;

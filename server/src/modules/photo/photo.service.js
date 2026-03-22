@@ -42,6 +42,34 @@ function normalizeTaskWarnings(warnings) {
   return Array.isArray(warnings) ? warnings.filter(Boolean) : [];
 }
 
+
+function normalizePaginationNumber(value, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.floor(parsed);
+}
+
+function normalizeHistoryStatus(status) {
+  if (!status) return null;
+  const normalized = String(status).trim().toUpperCase();
+  return normalized || null;
+}
+
+function serializeTask(task) {
+  return {
+    taskId: task.task_id,
+    status: task.status,
+    previewUrl: task.preview_url,
+    resultUrl: task.result_url,
+    backgroundColor: task.background_color,
+    sizeCode: task.size_code,
+    qualityStatus: task.quality_status,
+    qualityMessage: task.quality_message,
+    warnings: Array.isArray(task.warnings) ? task.warnings : [],
+    createdAt: task.created_at
+  };
+}
+
 function createStructuredFailureData({ taskId, message, reasons, suggestions }) {
   return {
     taskId,
@@ -264,24 +292,32 @@ module.exports = {
     }
   },
 
+  async getPhotoHistory(userId, query = {}) {
+    const page = normalizePaginationNumber(query.page, 1);
+    const pageSize = normalizePaginationNumber(query.pageSize, 10);
+    const status = normalizeHistoryStatus(query.status);
+
+    const result = await photoRepository.findHistoryByUserId(userId, {
+      page,
+      pageSize,
+      status
+    });
+
+    return {
+      list: result.rows.map(serializeTask),
+      total: result.count,
+      page,
+      pageSize
+    };
+  },
+
   async getTaskDetail(taskId, userId) {
     const task = await photoRepository.findByTaskId(taskId, userId);
     if (!task) {
       throw new AppError('任务不存在', 404, null, 404);
     }
 
-    return {
-      taskId: task.task_id,
-      status: task.status,
-      previewUrl: task.preview_url,
-      resultUrl: task.result_url,
-      backgroundColor: task.background_color,
-      sizeCode: task.size_code,
-      qualityStatus: task.quality_status,
-      qualityMessage: task.quality_message,
-      warnings: Array.isArray(task.warnings) ? task.warnings : [],
-      createdAt: task.created_at
-    };
+    return serializeTask(task);
   },
 
   async assertUserCanProcess(user) {

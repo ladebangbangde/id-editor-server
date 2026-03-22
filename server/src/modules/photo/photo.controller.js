@@ -25,6 +25,11 @@ module.exports = {
     return success(res, result, 'success');
   }),
 
+  history: asyncHandler(async (req, res) => {
+    const result = await photoService.getPhotoHistory(req.user.id, req.query);
+    return success(res, result, 'success');
+  }),
+
   taskDetail: asyncHandler(async (req, res) => {
     const result = await photoService.getTaskDetail(req.params.taskId, req.user.id);
     return success(res, result, 'success');
