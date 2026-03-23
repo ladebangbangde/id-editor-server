@@ -1,21 +1,29 @@
 const crypto = require('crypto');
 const { UniqueConstraintError } = require('sequelize');
-const { SystemConfig } = require('../models');
 const AppError = require('../utils/app-error');
 
 const JWT_SECRET_CONFIG_KEY = 'jwt_secret';
 let cachedJwtSecret = null;
+let systemConfigModel = null;
+
+function getSystemConfigModel() {
+  if (!systemConfigModel) {
+    ({ SystemConfig: systemConfigModel } = require('../models'));
+  }
+
+  return systemConfigModel;
+}
 
 function generateJwtSecret() {
   return crypto.randomBytes(64).toString('base64url');
 }
 
 async function ensureSystemConfigTable() {
-  await SystemConfig.sync();
+  await getSystemConfigModel().sync();
 }
 
 async function getConfig(configKey) {
-  return SystemConfig.findOne({
+  return getSystemConfigModel().findOne({
     where: {
       configKey,
       isActive: 1
@@ -24,6 +32,7 @@ async function getConfig(configKey) {
 }
 
 async function setConfig(configKey, configValue) {
+  const SystemConfig = getSystemConfigModel();
   const existing = await SystemConfig.findOne({ where: { configKey } });
 
   if (existing) {
