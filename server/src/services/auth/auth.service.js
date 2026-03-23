@@ -3,6 +3,7 @@ const AppError = require('../../utils/app-error');
 const { signUserToken } = require('../../utils/token-helper');
 const { presentUser } = require('../../utils/user-presenter');
 const { code2Session, getWechatAuthConfig } = require('../../integrations/wechat/wechat-auth.client');
+const logger = require('../../utils/logger');
 
 function normalizeProfile(profile = {}) {
   return {
@@ -55,11 +56,30 @@ async function upsertWechatUser({ openid, unionid, profile }) {
 }
 
 async function wxLogin({ code, nickname, avatarUrl, gender }) {
+  logger.info('wx-login payload inspection', {
+    body: { code, nickname, avatarUrl, gender },
+    hasCode: Boolean(code && String(code).trim())
+  });
+
   if (!code || !String(code).trim()) {
+    logger.warn('wx-login rejected because code is missing', {
+      body: { code, nickname, avatarUrl, gender },
+      hasCode: false,
+      message: 'code 缺失'
+    });
     throw new AppError('code 缺失', 400, null, 9000);
   }
 
-  getWechatAuthConfig();
+  try {
+    getWechatAuthConfig();
+  } catch (error) {
+    logger.error('wx-login missing WeChat config', {
+      hasCode: true,
+      message: error.message,
+      businessCode: error.businessCode || null
+    });
+    throw error;
+  }
 
   const session = await code2Session(String(code).trim());
   const profile = normalizeProfile({ nickname, avatarUrl, gender });

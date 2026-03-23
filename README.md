@@ -29,13 +29,14 @@
 ### 1) 配置环境变量
 
 ```bash
-cd server
-cp .env .env
+cp .env.example .env.runtime
+# 编辑 .env.runtime，填入真实配置
 ```
 
 ### 2) 安装依赖
 
 ```bash
+cd server
 npm install
 ```
 
@@ -48,10 +49,38 @@ mysql -u root -p < sql/init.sql
 ### 4) 启动服务
 
 ```bash
+cd server
 npm run dev
 ```
 
 默认地址：`http://localhost:3000`
+
+## Dockerfile + docker run（生产推荐）
+
+### 构建镜像
+
+```bash
+docker build -t id-editor-server:latest .
+```
+
+### 启动容器
+
+```bash
+docker run -d \
+  --name id-editor-server \
+  -p 30000:3000 \
+  --env-file .env.runtime \
+  -v $(pwd)/data/uploads:/app/uploads \
+  id-editor-server:latest
+```
+
+## docker compose（未来可直接复用同一份配置）
+
+仓库中的 `docker-compose.yml` 已改为读取根目录 `.env.runtime`。创建好该文件后，可直接执行：
+
+```bash
+docker compose up -d --build
+```
 
 ## 核心 API（v1）
 

@@ -12,7 +12,7 @@
 1. `id-editor-server` 与 `id-editor-tool` 必须是两个独立容器。
 2. MySQL 部署在宿主机，不在 `docker-compose.yml` 中创建 MySQL 服务。
 3. `id-editor-server` 通过 HTTP 调用 `id-editor-tool`，地址使用：
-   - `AI_SERVICE_BASE_URL=http://id-editor-tool:8000`
+   - `ID_EDITOR_TOOL_BASE_URL=http://id-editor-tool:8000`
 4. 两个容器必须共享宿主机 uploads 目录挂载。
 
 ## 2. 服务职责说明
@@ -55,10 +55,11 @@
 
 ```text
 id-editor/
-  id-editor-server/
-    Dockerfile
-    .dockerignore
-    .env.example
+  Dockerfile
+  .dockerignore
+  .env.example
+  docker-compose.yml
+  server/
     package.json
     src/
   id-editor-tool/
@@ -70,7 +71,6 @@ id-editor/
       hd/
       print/
       temp/
-  docker-compose.yml
   docs/
     deployment-server.md
 ```
@@ -86,64 +86,92 @@ uploads 目录职责：
 
 两个容器内统一挂载路径为：`/app/uploads`。
 
-## 5. 环境变量配置（id-editor-server）
+## 5. 统一环境变量方案（兼容 docker run / docker compose）
 
-复制模板并填写真实值：
+仓库内只保留一份可提交 Git 的模板文件：
 
 ```bash
-cp id-editor-server/.env id-editor-server/.env
+cp .env.example .env.runtime
 ```
 
-核心变量如下：
+说明：
+
+- `.env.example`：提交到 Git，只保留字段名与示例默认值，不放真实敏感信息。
+- `.env.runtime`：只放在服务器上，不提交 Git。
+- 当前 `docker run --env-file .env.runtime` 使用它。
+- 未来 `docker compose` 继续复用同一个 `.env.runtime`。
+
+### 5.1 必填核心变量
 
 - `NODE_ENV=production`
 - `PORT=3000`
+- `API_PREFIX=/api`
+- `BASE_URL`
+- `AUTH_MOCK_MODE=false`
+- `WECHAT_APPID`
+- `WECHAT_SECRET`
+- `JWT_SECRET`
+- `JWT_EXPIRES_IN=7d`
 - `DB_HOST`
 - `DB_PORT`
 - `DB_NAME`
 - `DB_USER`
 - `DB_PASSWORD`
-- `DB_DIALECT`（默认 mysql）
+- `DB_DIALECT=mysql`
+- `ID_EDITOR_TOOL_BASE_URL`
+- `ID_EDITOR_TOOL_PUBLIC_BASE_URL`
+- `ID_EDITOR_TOOL_TIMEOUT=30000`
+
+### 5.2 与当前主链路兼容的补充变量
+
 - `DB_TIMEZONE`（默认 +08:00）
-- `DB_URL`（可选，单连接串，优先于分散字段）
-- `DB_CONFIG_JSON`（可选，JSON 字符串注入）
-- `DB_CONFIG_FILE`（可选，JSON 文件路径，适合挂载外部配置）
-- `AI_SERVICE_BASE_URL=http://id-editor-tool:8000`
+- `DB_LOGGING=false`
 - `UPLOAD_DIR=/app/uploads`
 - `TOOL_SHARED_UPLOAD_ROOT=/app/uploads`
+- `MAX_FILE_SIZE=10485760`
 - `LOG_LEVEL=info`
-- `JWT_EXPIRES_IN=7d`（可选，默认 7d）
-- `WECHAT_APPID`
-- `WECHAT_SECRET`
-- `AUTH_MOCK_MODE=false`（生产建议显式关闭）
-- `ORDER_CURRENCY=CNY`
+- `ADMIN_JWT_EXPIRES_IN=2h`
 
+### 5.3 `.env.runtime` 推荐模板（不要提交 Git）
 
-### 数据库连接配置优先级（支持外部注入）
+```dotenv
+NODE_ENV=production
+PORT=3000
+API_PREFIX=/api
+BASE_URL=https://photo.ldbbd.com
+AUTH_MOCK_MODE=false
 
-id-editor-server 的数据库配置按以下顺序覆盖（后者优先级更高）：
+WECHAT_APPID=请填写真实值
+WECHAT_SECRET=请填写真实值
 
-1. 基础环境变量：`DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD`
-2. 配置文件：`DB_CONFIG_FILE` 指向的 JSON 文件（建议通过 Docker volume 挂载）
-3. JSON 字符串：`DB_CONFIG_JSON`
+JWT_SECRET=请填写真实值
+JWT_EXPIRES_IN=7d
+ADMIN_JWT_EXPIRES_IN=2h
 
-另外：
+DB_HOST=请填写真实值
+DB_PORT=3306
+DB_NAME=请填写真实值
+DB_USER=请填写真实值
+DB_PASSWORD=请填写真实值
+DB_DIALECT=mysql
+DB_TIMEZONE=+08:00
+DB_LOGGING=false
 
-- 如果提供 `DB_URL`（或在 JSON 中提供 `uri`），将优先使用连接串模式。
-- `DB_CONFIG_FILE` / `DB_CONFIG_JSON` 可携带 `options` 字段，透传 Sequelize 连接参数。
+UPLOAD_DIR=/app/uploads
+TOOL_SHARED_UPLOAD_ROOT=/app/uploads
+MAX_FILE_SIZE=10485760
 
-`db.config.json` 示例：
-
-```json
-{
-  "uri": "mysql://root:123456@host.docker.internal:3306/ai_id_photo",
-  "options": {
-    "dialect": "mysql",
-    "timezone": "+08:00",
-    "logging": false
-  }
-}
+ID_EDITOR_TOOL_BASE_URL=http://id-editor-tool:8000
+ID_EDITOR_TOOL_PUBLIC_BASE_URL=https://photo.ldbbd.com/tool
+ID_EDITOR_TOOL_TIMEOUT=30000
+LOG_LEVEL=info
 ```
+
+填写建议：
+
+1. **必须填写真实值**：`WECHAT_APPID`、`WECHAT_SECRET`、`JWT_SECRET`、`DB_HOST`、`DB_NAME`、`DB_USER`、`DB_PASSWORD`。
+2. **可保留默认值**：`PORT`、`API_PREFIX`、`JWT_EXPIRES_IN`、`ADMIN_JWT_EXPIRES_IN`、`DB_PORT`、`DB_DIALECT`、`DB_TIMEZONE`、`DB_LOGGING`、`UPLOAD_DIR`、`TOOL_SHARED_UPLOAD_ROOT`、`MAX_FILE_SIZE`、`ID_EDITOR_TOOL_TIMEOUT`、`LOG_LEVEL`。
+3. **与当前 `photo.ldbbd.com` 部署强相关**：`BASE_URL`、`ID_EDITOR_TOOL_PUBLIC_BASE_URL`，以及是否将 `ID_EDITOR_TOOL_BASE_URL` 指向内网服务地址（如 `http://id-editor-tool:8000`）。
 
 ## 6. DB_HOST 配置说明（Linux / Mac / Windows）
 
@@ -160,7 +188,22 @@ id-editor-server 的数据库配置按以下顺序覆盖（后者优先级更高
 
 ## 7. 启动与运维命令
 
-### 启动
+### 启动（当前 Dockerfile + docker run）
+
+```bash
+docker build -t id-editor-server:latest .
+```
+
+```bash
+docker run -d \
+  --name id-editor-server \
+  -p 30000:3000 \
+  --env-file .env.runtime \
+  -v $(pwd)/data/uploads:/app/uploads \
+  id-editor-server:latest
+```
+
+### 未来切换 docker compose
 
 ```bash
 docker compose up -d --build
@@ -223,10 +266,18 @@ docker compose down
 3. `restart: unless-stopped` 提升异常退出后的自动恢复能力。
 4. 错误日志可直接通过 `docker compose logs` 查看。
 
+`docker-compose.yml` 中 `server` 服务已统一改为：
+
+- `build.context: .`
+- `dockerfile: Dockerfile`
+- `env_file: ./.env.runtime`
+
+因此未来切换 compose 时不需要重写配置逻辑，只需要继续维护同一个 `.env.runtime`。
+
 ## 10. 安全基线（第一版）
 
-1. 不要把真实数据库密码、JWT 密钥提交到仓库。
-2. 使用 `.env` 注入敏感配置。
+1. 不要把真实数据库密码、JWT 密钥、微信密钥提交到仓库。
+2. 使用 `.env.runtime` 注入敏感配置。
 3. `id-editor-server` 容器不内置 MySQL。
 4. `id-editor-server` 不应直接把高清原图目录对公网静态暴露。
 5. 第一版允许直接暴露 `3000` 端口，仅建议用于开发/内网测试。

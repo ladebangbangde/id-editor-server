@@ -1,13 +1,13 @@
 services:
   id-editor-server:
     build:
-      context: ./server
-      dockerfile: ../id-editor-server/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     container_name: id-editor-server
     env_file:
-      - ./server/.env.example
+      - ./.env.runtime
     ports:
-      - "3000:3000"
+      - "30000:3000"
     volumes:
       - ./data/uploads:/app/uploads
     depends_on:
