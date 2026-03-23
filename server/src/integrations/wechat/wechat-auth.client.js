@@ -8,6 +8,7 @@ function getWechatAuthConfig() {
   if (!appConfig.wechatAppId) {
     logger.error('wechat auth config missing', {
       field: 'WECHAT_APPID',
+      exists: false,
       message: '微信登录配置缺失: WECHAT_APPID 未配置'
     });
     throw new AppError('微信登录配置缺失: WECHAT_APPID 未配置', 400, null, 9007);
@@ -16,6 +17,7 @@ function getWechatAuthConfig() {
   if (!appConfig.wechatSecret) {
     logger.error('wechat auth config missing', {
       field: 'WECHAT_SECRET',
+      exists: false,
       message: '微信登录配置缺失: WECHAT_SECRET 未配置'
     });
     throw new AppError('微信登录配置缺失: WECHAT_SECRET 未配置', 400, null, 9008);

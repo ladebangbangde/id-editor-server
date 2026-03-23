@@ -1,6 +1,8 @@
 node_modules/
 server/node_modules/
-server/.env
+**/.env
+**/.env.*
+!**/.env.example
 .DS_Store
 server/storage/uploads/*
 server/storage/processed/*

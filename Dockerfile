@@ -1,14 +1,14 @@
 FROM node:20-alpine
 
-WORKDIR /app
+WORKDIR /app/server
 
 RUN apk add --no-cache dumb-init curl
 
-COPY package*.json ./
+COPY server/package*.json ./
 
 RUN npm install --omit=dev && npm cache clean --force
 
-COPY . .
+COPY server/. ./
 
 RUN mkdir -p /app/uploads /app/uploads/original /app/uploads/preview /app/uploads/hd /app/uploads/print /app/uploads/temp /app/config \
   && chown -R node:node /app
