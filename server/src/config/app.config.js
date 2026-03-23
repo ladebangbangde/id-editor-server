@@ -1,6 +1,9 @@
 const path = require('path');
 
 const uploadDir = path.resolve(process.env.UPLOAD_DIR || '/app/uploads');
+const authMockMode = process.env.AUTH_MOCK_MODE
+  ? process.env.AUTH_MOCK_MODE === 'true'
+  : (process.env.NODE_ENV || 'development') !== 'production';
 
 module.exports = {
   nodeEnv: process.env.NODE_ENV || 'development',
@@ -10,6 +13,9 @@ module.exports = {
   jwtSecret: process.env.JWT_SECRET || 'replace-me',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
   adminJwtExpiresIn: process.env.ADMIN_JWT_EXPIRES_IN || '2h',
+  wechatAppId: process.env.WECHAT_APPID || '',
+  wechatSecret: process.env.WECHAT_SECRET || '',
+  authMockMode,
   uploadDir,
   toolSharedUploadRoot: path.resolve(process.env.TOOL_SHARED_UPLOAD_ROOT || uploadDir),
   maxFileSize: Number(process.env.MAX_FILE_SIZE || 10 * 1024 * 1024),
