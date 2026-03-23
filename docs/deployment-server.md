@@ -110,7 +110,6 @@ cp .env.example .env.runtime
 - `AUTH_MOCK_MODE=false`
 - `WECHAT_APPID`
 - `WECHAT_SECRET`
-- `JWT_SECRET`
 - `JWT_EXPIRES_IN=7d`
 - `DB_HOST`
 - `DB_PORT`
@@ -144,7 +143,6 @@ AUTH_MOCK_MODE=false
 WECHAT_APPID=请填写真实值
 WECHAT_SECRET=请填写真实值
 
-JWT_SECRET=请填写真实值
 JWT_EXPIRES_IN=7d
 ADMIN_JWT_EXPIRES_IN=2h
 
@@ -169,9 +167,17 @@ LOG_LEVEL=info
 
 填写建议：
 
-1. **必须填写真实值**：`WECHAT_APPID`、`WECHAT_SECRET`、`JWT_SECRET`、`DB_HOST`、`DB_NAME`、`DB_USER`、`DB_PASSWORD`。
+1. **必须填写真实值**：`WECHAT_APPID`、`WECHAT_SECRET`、`DB_HOST`、`DB_NAME`、`DB_USER`、`DB_PASSWORD`。
 2. **可保留默认值**：`PORT`、`API_PREFIX`、`JWT_EXPIRES_IN`、`ADMIN_JWT_EXPIRES_IN`、`DB_PORT`、`DB_DIALECT`、`DB_TIMEZONE`、`DB_LOGGING`、`UPLOAD_DIR`、`TOOL_SHARED_UPLOAD_ROOT`、`MAX_FILE_SIZE`、`ID_EDITOR_TOOL_TIMEOUT`、`LOG_LEVEL`。
 3. **与当前 `photo.ldbbd.com` 部署强相关**：`BASE_URL`、`ID_EDITOR_TOOL_PUBLIC_BASE_URL`，以及是否将 `ID_EDITOR_TOOL_BASE_URL` 指向内网服务地址（如 `http://id-editor-tool:8000`）。
+
+### 5.4 JWT_SECRET 最终策略
+
+- `JWT_SECRET` 不从环境变量读取。
+- server 启动时会检查 `system_configs` 中是否已有 `config_key=jwt_secret`。
+- 若不存在，则自动生成高强度随机密钥并写入数据库。
+- 后续签发与校验都只读取数据库中同一条 `jwt_secret`。
+- 不会在每次启动时重新生成，也不会按时间自动轮换。
 
 ## 6. DB_HOST 配置说明（Linux / Mac / Windows）
 
@@ -189,6 +195,14 @@ LOG_LEVEL=info
 ## 7. 启动与运维命令
 
 ### 启动（当前 Dockerfile + docker run）
+
+最小约定：
+
+1. Dockerfile 不保存任何真实配置。
+2. 真实配置只放在服务器 `.env.runtime`。
+3. `docker run` 推荐使用 `--env-file .env.runtime`。
+4. server 启动后会自动初始化 `jwt_secret` 到数据库 `system_configs`。
+5. `WECHAT_APPID` / `WECHAT_SECRET` 必须通过 env 提供。
 
 ```bash
 docker build -t id-editor-server:latest .

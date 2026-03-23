@@ -31,6 +31,7 @@
 ```bash
 cp .env.example .env.runtime
 # 编辑 .env.runtime，填入真实配置
+# 注意：JWT_SECRET 不需要手工填写，server 首次启动会自动生成并写入数据库 system_configs
 ```
 
 ### 2) 安装依赖
@@ -56,6 +57,11 @@ npm run dev
 默认地址：`http://localhost:3000`
 
 ## Dockerfile + docker run（生产推荐）
+
+- Dockerfile 不保存任何真实配置。
+- 真实配置统一写在服务器上的 `.env.runtime`。
+- `WECHAT_APPID` / `WECHAT_SECRET` 必须通过 `.env.runtime` 提供。
+- server 首次启动后会自动把 `jwt_secret` 初始化到数据库 `system_configs` 表，后续签发和校验统一读取数据库中的同一份密钥。
 
 ### 构建镜像
 

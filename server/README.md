@@ -8,7 +8,9 @@ npm install
 
 ## 初始化数据库
 1. 在仓库根目录创建 `.env.runtime`（参考 `../.env.example`）
-2. 执行：
+2. `WECHAT_APPID` / `WECHAT_SECRET` 必须填写真实值
+3. `JWT_SECRET` 不需要写入 env，server 首次启动会自动写入数据库 `system_configs`
+4. 执行：
 ```bash
 mysql -uroot -p < sql/init.sql
 ```
