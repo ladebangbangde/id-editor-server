@@ -11,7 +11,7 @@ function getBearerToken(req) {
     return null;
   }
 
-  return authorization.slice(7).trim();
+  return authorization.slice(7).trim() || null;
 }
 
 async function attachMockUser(req) {
@@ -35,7 +35,7 @@ module.exports = async (req, res, next) => {
     const token = getBearerToken(req);
 
     if (token) {
-      const payload = verifyToken(token);
+      const payload = await verifyToken(token);
       const user = await User.findOne({ where: { id: payload.userId, openid: payload.openid } });
 
       if (!user) {
@@ -51,7 +51,7 @@ module.exports = async (req, res, next) => {
       return next();
     }
 
-    throw new AppError('登录态无效', 401, null, 9001);
+    throw new AppError('token 校验失败', 401, null, 9015);
   } catch (error) {
     next(error);
   }

@@ -112,7 +112,10 @@ cp id-editor-server/.env id-editor-server/.env
 - `UPLOAD_DIR=/app/uploads`
 - `TOOL_SHARED_UPLOAD_ROOT=/app/uploads`
 - `LOG_LEVEL=info`
-- `JWT_SECRET=replace_with_secure_value`
+- `JWT_EXPIRES_IN=7d`（可选，默认 7d）
+- `WECHAT_APPID`
+- `WECHAT_SECRET`
+- `AUTH_MOCK_MODE=false`（生产建议显式关闭）
 - `ORDER_CURRENCY=CNY`
 
 

@@ -10,7 +10,6 @@ module.exports = {
   port: Number(process.env.PORT || 3000),
   apiPrefix: process.env.API_PREFIX || '/api',
   baseUrl: process.env.BASE_URL || 'http://localhost:3000',
-  jwtSecret: process.env.JWT_SECRET || 'replace-me',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
   adminJwtExpiresIn: process.env.ADMIN_JWT_EXPIRES_IN || '2h',
   wechatAppId: process.env.WECHAT_APPID || '',

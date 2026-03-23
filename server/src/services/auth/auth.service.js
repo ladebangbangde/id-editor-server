@@ -2,7 +2,7 @@ const { User } = require('../../models');
 const AppError = require('../../utils/app-error');
 const { signUserToken } = require('../../utils/token-helper');
 const { presentUser } = require('../../utils/user-presenter');
-const { code2Session } = require('../../integrations/wechat/wechat-auth.client');
+const { code2Session, getWechatAuthConfig } = require('../../integrations/wechat/wechat-auth.client');
 
 function normalizeProfile(profile = {}) {
   return {
@@ -27,7 +27,11 @@ async function upsertWechatUser({ openid, unionid, profile }) {
   let isNewUser = false;
 
   if (!user) {
-    user = await User.create(buildCreatePayload(openid, unionid, profile));
+    try {
+      user = await User.create(buildCreatePayload(openid, unionid, profile));
+    } catch (_error) {
+      throw new AppError('用户创建失败', 500, null, 9013);
+    }
     isNewUser = true;
   } else {
     const updatePayload = {};
@@ -52,8 +56,10 @@ async function upsertWechatUser({ openid, unionid, profile }) {
 
 async function wxLogin({ code, nickname, avatarUrl, gender }) {
   if (!code || !String(code).trim()) {
-    throw new AppError('code不能为空', 400, null, 9000);
+    throw new AppError('code 缺失', 400, null, 9000);
   }
+
+  getWechatAuthConfig();
 
   const session = await code2Session(String(code).trim());
   const profile = normalizeProfile({ nickname, avatarUrl, gender });
@@ -63,7 +69,7 @@ async function wxLogin({ code, nickname, avatarUrl, gender }) {
     profile
   });
 
-  const token = signUserToken({ userId: user.id, openid: user.openid });
+  const token = await signUserToken({ userId: user.id, openid: user.openid });
 
   return {
     token,

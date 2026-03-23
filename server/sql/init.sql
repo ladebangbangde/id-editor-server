@@ -143,6 +143,15 @@ CREATE TABLE IF NOT EXISTS admin_users (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS system_configs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  config_key VARCHAR(128) NOT NULL UNIQUE,
+  config_value LONGTEXT NOT NULL,
+  config_version INT UNSIGNED NOT NULL DEFAULT 1,
+  is_active TINYINT NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
 INSERT INTO scene_templates (scene_key, scene_name, width_mm, height_mm, pixel_width, pixel_height, description, allow_beauty, allow_print, is_active, sort_order) VALUES
 ('one_inch','一寸证件照',25.00,35.00,295,413,'一寸标准证件照',1,1,1,1),
 ('two_inch','二寸证件照',35.00,49.00,413,579,'二寸标准证件照',1,1,1,2),

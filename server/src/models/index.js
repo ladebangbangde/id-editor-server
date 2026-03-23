@@ -11,6 +11,7 @@ const Order = require('./order.model');
 const PaymentRecord = require('./payment-record.model');
 const DownloadRecord = require('./download-record.model');
 const AdminUser = require('./admin-user.model');
+const SystemConfig = require('./system-config.model');
 
 User.hasMany(Image, { foreignKey: 'user_id' });
 Image.belongsTo(User, { foreignKey: 'user_id' });
@@ -40,5 +41,6 @@ module.exports = {
   Order,
   PaymentRecord,
   DownloadRecord,
-  AdminUser
+  AdminUser,
+  SystemConfig
 };
