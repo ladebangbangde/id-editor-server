@@ -6,6 +6,16 @@ const generateIdPhoto = require('./image-pipeline/generate-id-photo');
 const generatePrintLayout = require('./image-pipeline/generate-print-layout');
 const { normalizeAssetPath } = require('../utils/asset-url');
 
+function buildImageMeta(url, width, height, purpose) {
+  if (!url) return null;
+  return {
+    format: String(url).split('?')[0].split('.').pop()?.toLowerCase() || null,
+    width: width || null,
+    height: height || null,
+    purpose
+  };
+}
+
 function serializeImageResult(result) {
   if (!result) return result;
 
@@ -21,8 +31,12 @@ function serializeImageResult(result) {
     print_url: printUrl,
     previewUrl,
     hdUrl,
+    // 兼容历史客户端：resultUrl 继续返回高清图，后续统一使用 hdUrl
     resultUrl: hdUrl,
-    printUrl
+    printUrl,
+    printLayoutUrl: printUrl,
+    previewMeta: buildImageMeta(previewUrl, serialized.pixel_width, serialized.pixel_height, 'preview'),
+    hdMeta: buildImageMeta(hdUrl, serialized.pixel_width, serialized.pixel_height, 'print')
   };
 }
 

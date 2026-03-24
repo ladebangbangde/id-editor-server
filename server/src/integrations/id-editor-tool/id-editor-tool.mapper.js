@@ -527,8 +527,9 @@ function buildGeneratePhotoPayload({ storedImagePath, sizeCode, backgroundColor,
   const sourceType = pickFirstString(sizeDefinition?.sourceType, DEFAULT_SIZE_SOURCE_TYPE) || DEFAULT_SIZE_SOURCE_TYPE;
   const payload = {
     imagePath: storedImagePath,
-    sizeKey: pickFirstString(sizeDefinition?.sizeCode, sizeCode),
-    sceneId: sourceType === TOOL_SOURCE_TYPES.SCENE ? pickFirstString(sizeDefinition?.sceneKey) : null,
+    // server 统一 canonical -> toolSizeKey，避免把模板 key 直接透传给工具侧
+    sizeKey: pickFirstString(sizeDefinition?.toolSizeKey, sizeDefinition?.sizeCode, sizeCode),
+    sceneId: sourceType === TOOL_SOURCE_TYPES.SCENE ? pickFirstString(sizeDefinition?.toolSceneKey, sizeDefinition?.sceneKey) : null,
     backgroundColor,
     enhance: !!enhance,
     saveOutput: true,
