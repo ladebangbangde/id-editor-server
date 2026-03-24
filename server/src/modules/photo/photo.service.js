@@ -14,7 +14,7 @@ const {
   inferBusinessErrorKey
 } = require('../../integrations/id-editor-tool/id-editor-tool.mapper');
 const photoRepository = require('./photo.repository');
-const { getPhotoSpecs, mergeSpecs, validateProcessPhotoPayload } = require('./dto/process-photo.dto');
+const { getPhotoSpecs, mergeSpecs, validateProcessPhotoPayload, normalizeSizeCode } = require('./dto/process-photo.dto');
 const { toToolSharedAbsolutePath } = require('../../utils/file-helper');
 
 function buildAbsoluteUrl(urlPath) {
@@ -76,12 +76,17 @@ function buildImageMeta(url, sizeDefinition, purpose) {
 
 function buildSizeDefinition(task, specs) {
   const allDefinitions = specs?.sizeDefinitions || [];
-  const fromSpec = allDefinitions.find((item) => item.sizeCode === task.size_code) || null;
+  const normalizedSizeCode = normalizeSizeCode(task.size_code) || task.size_code;
+  const fromSpec = allDefinitions.find((item) => item.sizeCode === normalizedSizeCode) || null;
   const mappedGenerate = task.response_payload?.generate?.data || task.response_payload?.generate?.result || {};
 
   return {
-    sizeCode: task.size_code,
-    name: fromSpec?.name || task.size_code,
+    sizeCode: normalizedSizeCode,
+    name: fromSpec?.name || normalizedSizeCode,
+    aliases: fromSpec?.aliases || [normalizedSizeCode],
+    toolSizeKey: fromSpec?.toolSizeKey || task.request_payload?.toolSizeKey || null,
+    category: fromSpec?.category || null,
+    featured: Boolean(fromSpec?.featured),
     widthMm: fromSpec?.widthMm || mappedGenerate.widthMm || null,
     heightMm: fromSpec?.heightMm || mappedGenerate.heightMm || null,
     pixelWidth: fromSpec?.pixelWidth || mappedGenerate.pixelWidth || null,
@@ -97,6 +102,8 @@ function buildPhotoTaskView(task, specs) {
   const printLayoutUrl = task.response_payload?.generate?.data?.printUrl || null;
   const requestPayload = task.request_payload?.clientRequest || {};
   const sizeDefinition = buildSizeDefinition(task, specs);
+  const originalRequestedSizeKey = requestPayload.sizeCode || task.request_payload?.originalRequestedSizeKey || task.size_code;
+  const normalizedSizeCode = normalizeSizeCode(task.size_code) || task.request_payload?.normalizedSizeCode || task.size_code;
 
   return {
     taskId: task.task_id,
@@ -111,12 +118,15 @@ function buildPhotoTaskView(task, specs) {
     resultUrl: hdUrl,
     printLayoutUrl,
     backgroundColor: task.background_color,
-    sizeCode: task.size_code,
+    sizeCode: normalizedSizeCode,
+    normalizedSizeCode,
+    originalRequestedSizeKey,
+    toolSizeKey: sizeDefinition?.toolSizeKey || task.request_payload?.toolSizeKey || null,
     size: sizeDefinition,
     options: {
       enhance: Boolean(requestPayload.enhance),
       backgroundColor: task.background_color,
-      sizeCode: task.size_code
+      sizeCode: normalizedSizeCode
     },
     qualityStatus: task.quality_status,
     qualityMessage: task.quality_message,
@@ -129,7 +139,8 @@ function buildPhotoTaskView(task, specs) {
       sourceUrl,
       originalUrl: sourceUrl,
       sourceFilePath: buildSourceFilePath(sourceUrl) || sourceUrl,
-      sizeCode: task.size_code,
+      sizeCode: normalizedSizeCode,
+      normalizedSizeCode,
       backgroundColor: task.background_color,
       options: {
         enhance: Boolean(requestPayload.enhance)
@@ -226,7 +237,8 @@ module.exports = {
       categorizedSizes: specs.categorizedSizes,
       customSizeRules: specs.customSizeRules,
       recommended: specs.recommended,
-      recentlyUsed: []
+      recentlyUsed: [],
+      unsupportedTemplateSceneKeys: specs.unsupportedTemplateSceneKeys
     };
   },
 
@@ -245,7 +257,9 @@ module.exports = {
 
     const requestPayload = validation.data;
     const mergedSpecs = validation.specs || mergeSpecs(specs);
-    const selectedSizeDefinition = mergedSpecs.sizeDefinitions.find((item) => item.sizeCode === requestPayload.sizeCode) || null;
+    const selectedSizeDefinition = validation.resolvedSize?.definition
+      || mergedSpecs.sizeDefinitions.find((item) => item.sizeCode === requestPayload.sizeCode)
+      || null;
     const sourceUrl = buildAbsoluteUrl(`/uploads/original/${path.basename(file.path)}`);
     const toolFilePath = buildToolFilePath(file.path);
     const localTaskId = `photo_${uuidv4().replace(/-/g, '')}`;
@@ -263,6 +277,9 @@ module.exports = {
       request_payload: {
         mode: 'idPhoto',
         clientRequest: requestPayload,
+        originalRequestedSizeKey: requestPayload.originalRequestedSizeKey,
+        normalizedSizeCode: requestPayload.normalizedSizeCode,
+        toolSizeKey: requestPayload.toolSizeKey,
         selectedSizeDefinition,
         toolFilePath
       }
@@ -297,6 +314,9 @@ module.exports = {
         request_payload: {
           mode: 'idPhoto',
           clientRequest: requestPayload,
+          originalRequestedSizeKey: requestPayload.originalRequestedSizeKey,
+          normalizedSizeCode: requestPayload.normalizedSizeCode,
+          toolSizeKey: requestPayload.toolSizeKey,
           selectedSizeDefinition,
           toolFilePath,
           detectRequest: detectRequestPayload,
@@ -323,7 +343,7 @@ module.exports = {
         status: 'SUCCESS',
         preview_url: previewUrl,
         result_url: hdUrl,
-        size_code: selectedSizeDefinition?.sizeCode || requestPayload.sizeCode,
+        size_code: requestPayload.normalizedSizeCode || selectedSizeDefinition?.sizeCode || requestPayload.sizeCode,
         background_color: generateResult.backgroundColor || requestPayload.backgroundColor,
         warnings,
         quality_status: quality.qualityStatus,
@@ -335,7 +355,10 @@ module.exports = {
             previewUrl,
             hdUrl,
             printLayoutUrl: idEditorToolClient.createAbsoluteOutputUrl(generateResult.printUrl),
-            sizeDefinition: selectedSizeDefinition
+            sizeDefinition: selectedSizeDefinition,
+            originalRequestedSizeKey: requestPayload.originalRequestedSizeKey,
+            normalizedSizeCode: requestPayload.normalizedSizeCode,
+            toolSizeKey: requestPayload.toolSizeKey
           }
         },
         error_code: null,
