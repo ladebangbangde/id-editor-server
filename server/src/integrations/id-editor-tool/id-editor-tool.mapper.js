@@ -70,6 +70,49 @@ function normalizeTextList(value) {
   }));
 }
 
+function normalizeFailureReasonItem(item, fallbackCode = null) {
+  if (!item) return null;
+
+  if (typeof item === 'string') {
+    const detail = item.trim();
+    if (!detail) return null;
+    return {
+      code: fallbackCode || 'TOOL_ERROR',
+      title: '处理失败',
+      detail
+    };
+  }
+
+  if (typeof item !== 'object') return null;
+
+  const detail = pickFirstString(item.detail, item.message, item.reason, item.text, item.description, item.msg);
+  const title = pickFirstString(item.title, item.name, item.label, item.summary, item.type) || '处理失败';
+  const code = pickFirstString(item.code, item.errorCode, item.reasonCode, item.key, fallbackCode) || 'TOOL_ERROR';
+
+  if (!detail && !title) return null;
+
+  return {
+    code,
+    title,
+    detail: detail || title
+  };
+}
+
+function dedupeFailureReasons(items = []) {
+  const result = [];
+  const seen = new Set();
+
+  for (const item of items) {
+    if (!item) continue;
+    const key = `${item.code || ''}|${item.title || ''}|${item.detail || ''}`.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+
+  return result;
+}
+
 function normalizeBoolean(value) {
   if (typeof value === 'boolean') return value;
   if (typeof value === 'number') return value > 0;
@@ -140,16 +183,18 @@ function extractFailureDetails(payload) {
 
   const data = unwrapToolData(payload) || {};
   const nestedError = payload.error && typeof payload.error === 'object' ? payload.error : {};
-  const reasons = unique([
-    ...normalizeTextList(nestedError.reasons),
-    ...normalizeTextList(nestedError.messages),
-    ...normalizeTextList(nestedError.warnings),
-    ...normalizeTextList(data.reasons),
-    ...normalizeTextList(data.messages),
-    ...normalizeTextList(data.warnings),
-    ...normalizeTextList(payload.reasons),
-    ...normalizeTextList(payload.messages),
-    ...normalizeTextList(payload.warnings)
+  const errorCode = pickFirstString(nestedError.code, payload.code, data.code);
+
+  const reasons = dedupeFailureReasons([
+    ...toArray(nestedError.reasons).map((item) => normalizeFailureReasonItem(item, errorCode)),
+    ...toArray(nestedError.messages).map((item) => normalizeFailureReasonItem(item, errorCode)),
+    ...toArray(nestedError.warnings).map((item) => normalizeFailureReasonItem(item, errorCode)),
+    ...toArray(data.reasons).map((item) => normalizeFailureReasonItem(item, errorCode)),
+    ...toArray(data.messages).map((item) => normalizeFailureReasonItem(item, errorCode)),
+    ...toArray(data.warnings).map((item) => normalizeFailureReasonItem(item, errorCode)),
+    ...toArray(payload.reasons).map((item) => normalizeFailureReasonItem(item, errorCode)),
+    ...toArray(payload.messages).map((item) => normalizeFailureReasonItem(item, errorCode)),
+    ...toArray(payload.warnings).map((item) => normalizeFailureReasonItem(item, errorCode))
   ]);
   const suggestions = unique([
     ...normalizeTextList(nestedError.suggestions),
@@ -163,7 +208,15 @@ function extractFailureDetails(payload) {
 }
 
 function inferFailureSuggestions(errorKey, reasons = [], message = '') {
-  const text = `${message} ${reasons.join(' ')}`.toLowerCase();
+  const reasonText = toArray(reasons)
+    .map((item) => {
+      if (typeof item === 'string') return item;
+      if (item && typeof item === 'object') return pickFirstString(item.detail, item.title, item.code);
+      return null;
+    })
+    .filter(Boolean)
+    .join(' ');
+  const text = `${message} ${reasonText}`.toLowerCase();
   const inferred = [];
 
   if (/遮挡|occlusion|blocked|cover|眼.*遮|右眼|左眼/.test(text)) inferred.push('请露出双眼与完整面部');
@@ -185,7 +238,10 @@ function buildFailureDetails({ error, payload, fallbackMessage, errorKey } = {})
     sourcePayload?.message,
     sourcePayload?.error?.message
   ) || '处理失败';
-  const reasons = details.reasons.length > 0 ? details.reasons : [message];
+  const fallbackCode = pickFirstString(error?.toolCode, sourcePayload?.error?.code, sourcePayload?.code);
+  const reasons = details.reasons.length > 0
+    ? details.reasons
+    : [normalizeFailureReasonItem({ code: fallbackCode, title: '处理失败', detail: message }, fallbackCode)];
   const inferredKey = errorKey || inferBusinessErrorKey(error || { payload: sourcePayload }) || 'PROCESS_FAILED';
   const suggestions = details.suggestions.length > 0
     ? details.suggestions

@@ -71,10 +71,42 @@ function serializeTask(task) {
 }
 
 function createStructuredFailureData({ taskId, message, reasons, suggestions }) {
+  const normalizedReasons = Array.isArray(reasons)
+    ? reasons
+        .map((item) => {
+          if (!item) return null;
+          if (typeof item === 'string') {
+            const detail = item.trim();
+            if (!detail) return null;
+            return { code: 'PHOTO_PROCESS_FAILED', title: '处理失败', detail };
+          }
+          if (typeof item !== 'object') return null;
+          const detail = typeof item.detail === 'string'
+            ? item.detail.trim()
+            : (typeof item.message === 'string' ? item.message.trim() : '');
+          const title = typeof item.title === 'string' && item.title.trim()
+            ? item.title.trim()
+            : '处理失败';
+          if (!detail) return null;
+          return {
+            code: item.code || 'PHOTO_PROCESS_FAILED',
+            title,
+            detail
+          };
+        })
+        .filter(Boolean)
+    : [];
+
+  const defaultDetail = typeof message === 'string' && message.trim() ? message.trim() : '处理失败';
+
   return {
     taskId,
-    reasons: Array.isArray(reasons) && reasons.length > 0 ? reasons : [message],
-    suggestions: Array.isArray(suggestions) && suggestions.length > 0 ? suggestions : ['请上传清晰、正面、完整的人像照片后重试']
+    reasons: normalizedReasons.length > 0
+      ? normalizedReasons
+      : [{ code: 'PHOTO_PROCESS_FAILED', title: '处理失败', detail: defaultDetail }],
+    suggestions: Array.isArray(suggestions) && suggestions.length > 0
+      ? suggestions
+      : ['请上传清晰、正面、完整的人像照片', '请确保光线充足且背景简洁', '请保持面部无遮挡并正对镜头']
   };
 }
 
