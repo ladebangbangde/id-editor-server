@@ -32,6 +32,15 @@ function buildToolFilePath(filePath) {
   return toToolSharedAbsolutePath(filePath);
 }
 
+function buildSourceFilePath(sourceUrl) {
+  if (!sourceUrl) return null;
+  try {
+    return new URL(sourceUrl).pathname;
+  } catch (_error) {
+    return sourceUrl.startsWith('/') ? sourceUrl : `/${sourceUrl}`;
+  }
+}
+
 function serializeToolError(error) {
   return {
     type: error.type || 'UNKNOWN',
@@ -58,21 +67,72 @@ function normalizeHistoryStatus(status) {
   return normalized || null;
 }
 
-function serializeTask(task) {
-  const requestPayload = task.request_payload || {};
+function buildImageMeta(url, purpose) {
+  if (!url) return null;
+  return {
+    format: String(url).split('?')[0].split('.').pop()?.toLowerCase() || null,
+    width: null,
+    height: null,
+    purpose
+  };
+}
+
+function buildFormalWearTaskView(task) {
+  const requestPayload = task.request_payload?.clientRequest || task.request_payload || {};
+  const responseSummary = task.response_payload?.summary || {};
+  const sourceUrl = task.source_url;
+  const previewUrl = task.preview_url;
+  const hdUrl = task.result_url;
 
   return {
     taskId: task.task_id,
+    flowType: 'formalWear',
     status: task.status,
-    previewUrl: task.preview_url,
-    resultUrl: task.result_url,
-    gender: requestPayload.gender || null,
-    style: requestPayload.style || null,
-    color: task.background_color || requestPayload.color || null,
-    warnings: Array.isArray(task.warnings) ? task.warnings : [],
+    sourceUrl,
+    originalUrl: sourceUrl,
+    sourceFilePath: buildSourceFilePath(sourceUrl) || sourceUrl,
+    previewUrl,
+    hdUrl,
+    // 兼容历史客户端：resultUrl 继续返回高清图，后续统一使用 hdUrl
+    resultUrl: hdUrl,
+    printLayoutUrl: null,
+    backgroundColor: task.background_color,
+    sizeCode: task.size_code,
+    size: {
+      sizeCode: task.size_code,
+      name: 'formalWear',
+      widthMm: null,
+      heightMm: null,
+      pixelWidth: null,
+      pixelHeight: null
+    },
+    options: {
+      gender: responseSummary.gender || requestPayload.gender || null,
+      style: responseSummary.style || requestPayload.style || null,
+      color: task.background_color || responseSummary.color || requestPayload.color || null,
+      enhance: Boolean(requestPayload.enhance)
+    },
     qualityStatus: task.quality_status,
     qualityMessage: task.quality_message,
-    createdAt: task.created_at
+    warnings: Array.isArray(task.warnings) ? task.warnings : [],
+    previewMeta: buildImageMeta(previewUrl, 'preview'),
+    hdMeta: buildImageMeta(hdUrl, 'print'),
+    createdAt: task.created_at,
+    editDraft: {
+      flowType: 'formalWear',
+      sourceUrl,
+      originalUrl: sourceUrl,
+      sourceFilePath: buildSourceFilePath(sourceUrl) || sourceUrl,
+      sizeCode: task.size_code,
+      backgroundColor: task.background_color,
+      options: {
+        gender: responseSummary.gender || requestPayload.gender || null,
+        style: responseSummary.style || requestPayload.style || null,
+        color: task.background_color || responseSummary.color || requestPayload.color || null,
+        enhance: Boolean(requestPayload.enhance)
+      },
+      nextRoute: '/pages/formal-wear/edit/index'
+    }
   };
 }
 
@@ -157,13 +217,13 @@ module.exports = {
 
       const warnings = normalizeTaskWarnings(generateResult.warnings || []);
       const previewUrl = idEditorToolClient.createAbsoluteOutputUrl(generateResult.previewUrl);
-      const resultUrl = idEditorToolClient.createAbsoluteOutputUrl(generateResult.hdUrl);
+      const hdUrl = idEditorToolClient.createAbsoluteOutputUrl(generateResult.hdUrl);
 
       const updatedRecord = await formalWearRepository.markSuccess(taskRecord.id, {
         task_id: generateResult.taskId || taskRecord.task_id,
         status: FORMAL_WEAR_DEFAULT_STATUS,
         preview_url: previewUrl,
-        result_url: resultUrl,
+        result_url: hdUrl,
         background_color: generateResult.color || requestPayload.color,
         warnings,
         quality_status: generateResult.qualityStatus || FORMAL_WEAR_DEFAULT_QUALITY_STATUS,
@@ -171,25 +231,20 @@ module.exports = {
         response_payload: {
           mode: 'formalWear',
           raw: toolResponse,
-          mapped: generateResult
+          mapped: generateResult,
+          summary: {
+            gender: generateResult.gender || requestPayload.gender,
+            style: generateResult.style || requestPayload.style,
+            color: generateResult.color || requestPayload.color,
+            previewUrl,
+            hdUrl
+          }
         },
         error_code: null,
         error_message: null
       });
 
-      return {
-        taskId: updatedRecord.task_id,
-        status: updatedRecord.status,
-        previewUrl: updatedRecord.preview_url,
-        resultUrl: updatedRecord.result_url,
-        gender: generateResult.gender || requestPayload.gender,
-        style: generateResult.style || requestPayload.style,
-        color: updatedRecord.background_color,
-        warnings,
-        qualityStatus: updatedRecord.quality_status,
-        qualityMessage: updatedRecord.quality_message,
-        createdAt: updatedRecord.created_at
-      };
+      return buildFormalWearTaskView(updatedRecord);
     } catch (error) {
       const mappedError = error instanceof AppError
         ? {
@@ -254,7 +309,7 @@ module.exports = {
     });
 
     return {
-      list: result.rows.map(serializeTask),
+      list: result.rows.map(buildFormalWearTaskView),
       total: result.count,
       page,
       pageSize
@@ -267,7 +322,16 @@ module.exports = {
       throw new AppError('任务不存在', 404, null, 404);
     }
 
-    return serializeTask(task);
+    return buildFormalWearTaskView(task);
+  },
+
+  async getTaskEditDraft(taskId, userId) {
+    const task = await formalWearRepository.findByTaskId(taskId, userId);
+    if (!task) {
+      throw new AppError('任务不存在', 404, null, 404);
+    }
+
+    return buildFormalWearTaskView(task).editDraft;
   },
 
   async assertUserCanProcess(user) {

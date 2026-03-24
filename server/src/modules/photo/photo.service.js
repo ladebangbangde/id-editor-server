@@ -28,6 +28,16 @@ function buildToolFilePath(filePath) {
   return toToolSharedAbsolutePath(filePath);
 }
 
+function buildSourceFilePath(sourceUrl) {
+  if (!sourceUrl) return null;
+  try {
+    const parsed = new URL(sourceUrl);
+    return parsed.pathname || null;
+  } catch (_error) {
+    return sourceUrl.startsWith('/') ? sourceUrl : `/${sourceUrl}`;
+  }
+}
+
 function serializeToolError(error) {
   return {
     type: error.type || 'UNKNOWN',
@@ -42,7 +52,6 @@ function normalizeTaskWarnings(warnings) {
   return Array.isArray(warnings) ? warnings.filter(Boolean) : [];
 }
 
-
 function normalizePaginationNumber(value, fallback) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
@@ -55,18 +64,78 @@ function normalizeHistoryStatus(status) {
   return normalized || null;
 }
 
-function serializeTask(task) {
+function buildImageMeta(url, sizeDefinition, purpose) {
+  if (!url) return null;
+  return {
+    format: String(url).split('?')[0].split('.').pop()?.toLowerCase() || null,
+    width: sizeDefinition?.pixelWidth || null,
+    height: sizeDefinition?.pixelHeight || null,
+    purpose
+  };
+}
+
+function buildSizeDefinition(task, specs) {
+  const allDefinitions = specs?.sizeDefinitions || [];
+  const fromSpec = allDefinitions.find((item) => item.sizeCode === task.size_code) || null;
+  const mappedGenerate = task.response_payload?.generate?.data || task.response_payload?.generate?.result || {};
+
+  return {
+    sizeCode: task.size_code,
+    name: fromSpec?.name || task.size_code,
+    widthMm: fromSpec?.widthMm || mappedGenerate.widthMm || null,
+    heightMm: fromSpec?.heightMm || mappedGenerate.heightMm || null,
+    pixelWidth: fromSpec?.pixelWidth || mappedGenerate.pixelWidth || null,
+    pixelHeight: fromSpec?.pixelHeight || mappedGenerate.pixelHeight || null
+  };
+}
+
+function buildPhotoTaskView(task, specs) {
+  const warnings = Array.isArray(task.warnings) ? task.warnings : [];
+  const sourceUrl = task.source_url;
+  const hdUrl = task.result_url;
+  const previewUrl = task.preview_url;
+  const printLayoutUrl = task.response_payload?.generate?.data?.printUrl || null;
+  const requestPayload = task.request_payload?.clientRequest || {};
+  const sizeDefinition = buildSizeDefinition(task, specs);
+
   return {
     taskId: task.task_id,
+    flowType: 'idPhoto',
     status: task.status,
-    previewUrl: task.preview_url,
-    resultUrl: task.result_url,
+    sourceUrl,
+    originalUrl: sourceUrl,
+    sourceFilePath: buildSourceFilePath(sourceUrl) || sourceUrl,
+    previewUrl,
+    hdUrl,
+    // 兼容历史客户端：resultUrl 继续返回高清图，后续统一使用 hdUrl
+    resultUrl: hdUrl,
+    printLayoutUrl,
     backgroundColor: task.background_color,
     sizeCode: task.size_code,
+    size: sizeDefinition,
+    options: {
+      enhance: Boolean(requestPayload.enhance),
+      backgroundColor: task.background_color,
+      sizeCode: task.size_code
+    },
     qualityStatus: task.quality_status,
     qualityMessage: task.quality_message,
-    warnings: Array.isArray(task.warnings) ? task.warnings : [],
-    createdAt: task.created_at
+    warnings,
+    previewMeta: buildImageMeta(previewUrl, sizeDefinition, 'preview'),
+    hdMeta: buildImageMeta(hdUrl, sizeDefinition, 'print'),
+    createdAt: task.created_at,
+    editDraft: {
+      flowType: 'idPhoto',
+      sourceUrl,
+      originalUrl: sourceUrl,
+      sourceFilePath: buildSourceFilePath(sourceUrl) || sourceUrl,
+      sizeCode: task.size_code,
+      backgroundColor: task.background_color,
+      options: {
+        enhance: Boolean(requestPayload.enhance)
+      },
+      nextRoute: '/pages/photo/edit/index'
+    }
   };
 }
 
@@ -151,7 +220,13 @@ module.exports = {
       backgroundColors: specs.backgroundColors,
       sizeCodes: specs.sizeCodes,
       papers: specs.papers,
-      formats: specs.formats
+      formats: specs.formats,
+      sizeDefinitions: specs.sizeDefinitions,
+      popularSizeCodes: specs.popularSizeCodes,
+      categorizedSizes: specs.categorizedSizes,
+      customSizeRules: specs.customSizeRules,
+      recommended: specs.recommended,
+      recentlyUsed: []
     };
   },
 
@@ -186,7 +261,9 @@ module.exports = {
       quality_status: 'WARNING',
       quality_message: '任务处理中',
       request_payload: {
+        mode: 'idPhoto',
         clientRequest: requestPayload,
+        selectedSizeDefinition,
         toolFilePath
       }
     });
@@ -218,7 +295,9 @@ module.exports = {
         quality_status: 'WARNING',
         quality_message: '证件照生成中',
         request_payload: {
+          mode: 'idPhoto',
           clientRequest: requestPayload,
+          selectedSizeDefinition,
           toolFilePath,
           detectRequest: detectRequestPayload,
           toolRequest: toolRequestPayload
@@ -237,13 +316,13 @@ module.exports = {
         ...(generateResult.warnings || [])
       ]);
       const previewUrl = idEditorToolClient.createAbsoluteOutputUrl(generateResult.previewUrl);
-      const resultUrl = idEditorToolClient.createAbsoluteOutputUrl(generateResult.hdUrl);
+      const hdUrl = idEditorToolClient.createAbsoluteOutputUrl(generateResult.hdUrl);
 
       const updatedRecord = await photoRepository.markSuccess(taskRecord.id, {
         task_id: generateResult.taskId || taskRecord.task_id,
         status: 'SUCCESS',
         preview_url: previewUrl,
-        result_url: resultUrl,
+        result_url: hdUrl,
         size_code: selectedSizeDefinition?.sizeCode || requestPayload.sizeCode,
         background_color: generateResult.backgroundColor || requestPayload.backgroundColor,
         warnings,
@@ -251,27 +330,19 @@ module.exports = {
         quality_message: quality.qualityMessage,
         response_payload: {
           detect: detectResponse,
-          generate: toolResponse
+          generate: toolResponse,
+          summary: {
+            previewUrl,
+            hdUrl,
+            printLayoutUrl: idEditorToolClient.createAbsoluteOutputUrl(generateResult.printUrl),
+            sizeDefinition: selectedSizeDefinition
+          }
         },
         error_code: null,
         error_message: null
       });
 
-      return {
-        taskId: updatedRecord.task_id,
-        status: updatedRecord.status,
-        previewUrl: updatedRecord.preview_url,
-        resultUrl: updatedRecord.result_url,
-        backgroundColor: updatedRecord.background_color,
-        sizeCode: updatedRecord.size_code,
-        width: generateResult.pixelWidth,
-        height: generateResult.pixelHeight,
-        widthMm: generateResult.widthMm,
-        heightMm: generateResult.heightMm,
-        warnings,
-        qualityStatus: updatedRecord.quality_status,
-        qualityMessage: updatedRecord.quality_message
-      };
+      return buildPhotoTaskView(updatedRecord, mergedSpecs);
     } catch (error) {
       const mappedError = error instanceof AppError
         ? {
@@ -335,8 +406,9 @@ module.exports = {
       status
     });
 
+    const specs = await loadRuntimeSpecs();
     return {
-      list: result.rows.map(serializeTask),
+      list: result.rows.map((task) => buildPhotoTaskView(task, specs)),
       total: result.count,
       page,
       pageSize
@@ -349,7 +421,18 @@ module.exports = {
       throw new AppError('任务不存在', 404, null, 404);
     }
 
-    return serializeTask(task);
+    const specs = await loadRuntimeSpecs();
+    return buildPhotoTaskView(task, specs);
+  },
+
+  async getTaskEditDraft(taskId, userId) {
+    const task = await photoRepository.findByTaskId(taskId, userId);
+    if (!task) {
+      throw new AppError('任务不存在', 404, null, 404);
+    }
+
+    const specs = await loadRuntimeSpecs();
+    return buildPhotoTaskView(task, specs).editDraft;
   },
 
   async assertUserCanProcess(user) {

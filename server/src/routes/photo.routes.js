@@ -6,5 +6,6 @@ router.get('/specs', controller.specs);
 router.post('/process', upload.single('file'), controller.process);
 router.get('/history', controller.history);
 router.get('/tasks/:taskId', controller.taskDetail);
+router.get('/tasks/:taskId/edit-draft', controller.editDraft);
 
 module.exports = router;

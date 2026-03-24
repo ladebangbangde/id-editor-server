@@ -33,5 +33,10 @@ module.exports = {
   taskDetail: asyncHandler(async (req, res) => {
     const result = await photoService.getTaskDetail(req.params.taskId, req.user.id);
     return success(res, result, 'success');
+  }),
+
+  editDraft: asyncHandler(async (req, res) => {
+    const result = await photoService.getTaskEditDraft(req.params.taskId, req.user.id);
+    return success(res, result, 'success');
   })
 };
