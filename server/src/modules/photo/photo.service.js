@@ -3,7 +3,6 @@ const { v4: uuidv4 } = require('uuid');
 const AppError = require('../../utils/app-error');
 const appConfig = require('../../config/app.config');
 const logger = require('../../utils/logger');
-const fs = require('fs');
 const idEditorToolClient = require('../../integrations/id-editor-tool/id-editor-tool.client');
 const {
   mapToolErrorToBusiness,
@@ -16,12 +15,12 @@ const {
 } = require('../../integrations/id-editor-tool/id-editor-tool.mapper');
 const photoRepository = require('./photo.repository');
 const { getPhotoSpecs, mergeSpecs, validateProcessPhotoPayload, normalizeSizeCode } = require('./dto/process-photo.dto');
-const { toToolSharedAbsolutePath, absoluteUploadPath, relativeUploadPath, ensureDir } = require('../../utils/file-helper');
-const { FOLDERS } = require('../../constants/file');
-const { toAbsolutePublicUrl } = require('../../utils/public-url');
+const { toToolSharedAbsolutePath } = require('../../utils/file-helper');
 
-function buildAbsoluteUrl(urlPath, req) {
-  return toAbsolutePublicUrl(urlPath, req);
+function buildAbsoluteUrl(urlPath) {
+  if (!urlPath) return null;
+  if (/^https?:\/\//i.test(urlPath)) return urlPath;
+  return new URL(urlPath.startsWith('/') ? urlPath : `/${urlPath}`, `${appConfig.baseUrl}/`).toString();
 }
 
 function buildToolFilePath(filePath) {
@@ -60,9 +59,22 @@ function normalizePaginationNumber(value, fallback) {
 }
 
 function normalizeHistoryStatus(status) {
-  if (!status) return null;
+  if (!status) return { raw: null, statuses: null };
   const normalized = String(status).trim().toUpperCase();
-  return normalized || null;
+  if (!normalized) return { raw: null, statuses: null };
+
+  const statusAliasMap = {
+    COMPLETED: ['SUCCESS'],
+    FINISHED: ['SUCCESS'],
+    DONE: ['SUCCESS'],
+    ALL: null
+  };
+
+  const mappedStatuses = statusAliasMap[normalized] ?? [normalized];
+  return {
+    raw: normalized,
+    statuses: mappedStatuses
+  };
 }
 
 function buildImageMeta(url, sizeDefinition, purpose) {
@@ -95,16 +107,12 @@ function buildSizeDefinition(task, specs) {
   };
 }
 
-function normalizePreviewUrl(previewUrl, hdUrl) {
-  return previewUrl || hdUrl || null;
-}
-
-function buildPhotoTaskView(task, specs, req) {
+function buildPhotoTaskView(task, specs) {
   const warnings = Array.isArray(task.warnings) ? task.warnings : [];
-  const sourceUrl = toAbsolutePublicUrl(task.source_url, req);
-  const hdUrl = toAbsolutePublicUrl(task.result_url, req);
-  const previewUrl = normalizePreviewUrl(toAbsolutePublicUrl(task.preview_url, req), hdUrl);
-  const printLayoutUrl = toAbsolutePublicUrl(task.response_payload?.summary?.printLayoutUrl || task.response_payload?.generate?.data?.printUrl || null, req);
+  const sourceUrl = task.source_url;
+  const hdUrl = task.result_url;
+  const previewUrl = task.preview_url;
+  const printLayoutUrl = task.response_payload?.generate?.data?.printUrl || null;
   const requestPayload = task.request_payload?.clientRequest || {};
   const sizeDefinition = buildSizeDefinition(task, specs);
   const originalRequestedSizeKey = requestPayload.sizeCode || task.request_payload?.originalRequestedSizeKey || task.size_code;
@@ -118,10 +126,7 @@ function buildPhotoTaskView(task, specs, req) {
     originalUrl: sourceUrl,
     sourceFilePath: buildSourceFilePath(sourceUrl) || sourceUrl,
     previewUrl,
-    thumbnailUrl: previewUrl,
-    preview_url: previewUrl,
     hdUrl,
-    hd_url: hdUrl,
     // 兼容历史客户端：resultUrl 继续返回高清图，后续统一使用 hdUrl
     resultUrl: hdUrl,
     printLayoutUrl,
@@ -156,47 +161,6 @@ function buildPhotoTaskView(task, specs, req) {
       nextRoute: '/pages/photo/edit/index'
     }
   };
-}
-
-async function persistToolAsset(rawOutputUrl, folder) {
-  if (!rawOutputUrl || !folder) return null;
-  const normalized = String(rawOutputUrl).trim();
-  if (!normalized) return null;
-  const fileName = path.basename(normalized.split('?')[0]);
-  if (!fileName || fileName === '/' || fileName === '.') return null;
-
-  const destination = absoluteUploadPath(folder, fileName);
-  await ensureDir(path.dirname(destination));
-
-  const candidates = [];
-  if (path.isAbsolute(normalized)) candidates.push(normalized);
-
-  let pathname = normalized;
-  if (/^https?:\/\//i.test(normalized)) {
-    try {
-      pathname = new URL(normalized).pathname || normalized;
-    } catch (_error) {
-      pathname = normalized;
-    }
-  }
-
-  const cleanPathname = pathname.split('?')[0];
-  if (cleanPathname.startsWith('/uploads/')) {
-    candidates.push(path.join(appConfig.toolSharedUploadRoot, cleanPathname.replace(/^\/uploads\//, '')));
-  }
-  if (cleanPathname.startsWith('/')) {
-    candidates.push(path.join(appConfig.toolSharedUploadRoot, cleanPathname.replace(/^\/+/, '')));
-  }
-
-  for (const source of candidates) {
-    if (!source || source === destination) continue;
-    if (fs.existsSync(source)) {
-      await fs.promises.copyFile(source, destination);
-      return relativeUploadPath(folder, fileName);
-    }
-  }
-
-  return normalized;
 }
 
 function createStructuredFailureData({ taskId, message, reasons, suggestions }) {
@@ -273,6 +237,13 @@ async function loadRuntimeSpecs() {
   return getPhotoSpecs();
 }
 
+function isLegacyFormalWearTask(task) {
+  if (!task) return false;
+  if (task.size_code === photoRepository.LEGACY_FORMAL_WEAR_SIZE_CODE) return true;
+  const mode = task.request_payload?.mode;
+  return typeof mode === 'string' && mode.toLowerCase() === 'formalwear';
+}
+
 module.exports = {
   async getSpecs() {
     const specs = await loadRuntimeSpecs();
@@ -291,7 +262,7 @@ module.exports = {
     };
   },
 
-  async processPhoto({ user, file, payload, req }) {
+  async processPhoto({ user, file, payload }) {
     await this.assertUserCanProcess(user);
 
     const specs = await loadRuntimeSpecs();
@@ -309,7 +280,7 @@ module.exports = {
     const selectedSizeDefinition = validation.resolvedSize?.definition
       || mergedSpecs.sizeDefinitions.find((item) => item.sizeCode === requestPayload.sizeCode)
       || null;
-    const sourceUrl = buildAbsoluteUrl(`/uploads/original/${path.basename(file.path)}`, req);
+    const sourceUrl = buildAbsoluteUrl(`/uploads/original/${path.basename(file.path)}`);
     const toolFilePath = buildToolFilePath(file.path);
     const localTaskId = `photo_${uuidv4().replace(/-/g, '')}`;
 
@@ -384,12 +355,8 @@ module.exports = {
         detectResult.pass === false ? detectResult.message : null,
         ...(generateResult.warnings || [])
       ]);
-      const persistedPreviewPath = await persistToolAsset(generateResult.previewUrl, FOLDERS.PREVIEW);
-      const persistedHdPath = await persistToolAsset(generateResult.hdUrl, FOLDERS.HD);
-      const persistedPrintPath = await persistToolAsset(generateResult.printUrl, FOLDERS.PRINT);
-      const previewUrl = buildAbsoluteUrl(persistedPreviewPath || generateResult.previewUrl || generateResult.hdUrl, req);
-      const hdUrl = buildAbsoluteUrl(persistedHdPath || generateResult.hdUrl, req);
-      const printLayoutUrl = buildAbsoluteUrl(persistedPrintPath || generateResult.printUrl, req);
+      const previewUrl = idEditorToolClient.createAbsoluteOutputUrl(generateResult.previewUrl);
+      const hdUrl = idEditorToolClient.createAbsoluteOutputUrl(generateResult.hdUrl);
 
       const updatedRecord = await photoRepository.markSuccess(taskRecord.id, {
         task_id: generateResult.taskId || taskRecord.task_id,
@@ -407,7 +374,7 @@ module.exports = {
           summary: {
             previewUrl,
             hdUrl,
-            printLayoutUrl,
+            printLayoutUrl: idEditorToolClient.createAbsoluteOutputUrl(generateResult.printUrl),
             sizeDefinition: selectedSizeDefinition,
             originalRequestedSizeKey: requestPayload.originalRequestedSizeKey,
             normalizedSizeCode: requestPayload.normalizedSizeCode,
@@ -418,7 +385,7 @@ module.exports = {
         error_message: null
       });
 
-      return buildPhotoTaskView(updatedRecord, mergedSpecs, req);
+      return buildPhotoTaskView(updatedRecord, mergedSpecs);
     } catch (error) {
       const mappedError = error instanceof AppError
         ? {
@@ -471,44 +438,88 @@ module.exports = {
     }
   },
 
-  async getPhotoHistory(userId, query = {}, req) {
+  async getPhotoHistory(user, query = {}) {
+    const userId = user?.id;
     const page = normalizePaginationNumber(query.page, 1);
     const pageSize = normalizePaginationNumber(query.pageSize, 10);
-    const status = normalizeHistoryStatus(query.status);
+    const normalizedStatus = normalizeHistoryStatus(query.status);
+    const statusFilters = normalizedStatus.statuses;
+
+    logger.info('photo history request user context', {
+      userId: userId || null,
+      openid: user?.openid || null,
+      unionid: user?.unionid || null,
+      accountId: user?.accountId || null
+    });
+    logger.info('photo history query conditions', {
+      userId: userId || null,
+      page,
+      pageSize,
+      statusRaw: normalizedStatus.raw,
+      statusFilters: statusFilters || []
+    });
 
     const result = await photoRepository.findHistoryByUserId(userId, {
       page,
       pageSize,
-      status
+      statuses: statusFilters
+    });
+    logger.info('photo history db raw result', {
+      userId: userId || null,
+      dbTotal: result.count,
+      dbRows: result.rows.length
+    });
+
+    const filteredRows = result.rows.filter((task) => {
+      if (isLegacyFormalWearTask(task)) {
+        logger.info('photo history record filtered', {
+          taskId: task.task_id,
+          reason: 'legacy_formal_wear_task'
+        });
+        return false;
+      }
+      return true;
+    });
+    logger.info('photo history service filtered result', {
+      userId: userId || null,
+      beforeFilter: result.rows.length,
+      afterFilter: filteredRows.length
     });
 
     const specs = await loadRuntimeSpecs();
+    const viewList = filteredRows.map((task) => buildPhotoTaskView(task, specs));
+    logger.info('photo history final response result', {
+      userId: userId || null,
+      beforeViewTransform: filteredRows.length,
+      finalListCount: viewList.length
+    });
+
     return {
-      list: result.rows.map((task) => buildPhotoTaskView(task, specs, req)),
+      list: viewList,
       total: result.count,
       page,
       pageSize
     };
   },
 
-  async getTaskDetail(taskId, userId, req) {
+  async getTaskDetail(taskId, userId) {
     const task = await photoRepository.findByTaskId(taskId, userId);
     if (!task) {
       throw new AppError('任务不存在', 404, null, 404);
     }
 
     const specs = await loadRuntimeSpecs();
-    return buildPhotoTaskView(task, specs, req);
+    return buildPhotoTaskView(task, specs);
   },
 
-  async getTaskEditDraft(taskId, userId, req) {
+  async getTaskEditDraft(taskId, userId) {
     const task = await photoRepository.findByTaskId(taskId, userId);
     if (!task) {
       throw new AppError('任务不存在', 404, null, 404);
     }
 
     const specs = await loadRuntimeSpecs();
-    return buildPhotoTaskView(task, specs, req).editDraft;
+    return buildPhotoTaskView(task, specs).editDraft;
   },
 
   async assertUserCanProcess(user) {

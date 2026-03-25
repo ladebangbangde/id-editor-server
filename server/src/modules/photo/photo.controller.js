@@ -19,25 +19,24 @@ module.exports = {
     const result = await photoService.processPhoto({
       user: req.user,
       file: req.file,
-      payload: req.body,
-      req
+      payload: req.body
     });
 
     return success(res, result, 'success');
   }),
 
   history: asyncHandler(async (req, res) => {
-    const result = await photoService.getPhotoHistory(req.user.id, req.query, req);
+    const result = await photoService.getPhotoHistory(req.user, req.query);
     return success(res, result, 'success');
   }),
 
   taskDetail: asyncHandler(async (req, res) => {
-    const result = await photoService.getTaskDetail(req.params.taskId, req.user.id, req);
+    const result = await photoService.getTaskDetail(req.params.taskId, req.user.id);
     return success(res, result, 'success');
   }),
 
   editDraft: asyncHandler(async (req, res) => {
-    const result = await photoService.getTaskEditDraft(req.params.taskId, req.user.id, req);
+    const result = await photoService.getTaskEditDraft(req.params.taskId, req.user.id);
     return success(res, result, 'success');
   })
 };
