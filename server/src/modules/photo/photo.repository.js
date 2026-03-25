@@ -1,7 +1,8 @@
 const { PhotoTask } = require('../../models');
 const { Op } = require('sequelize');
-const { FORMAL_WEAR_SIZE_CODE } = require('../formal-wear/formal-wear.constants');
 
+// 兼容历史换装任务数据：沿用旧 size_code 过滤，避免混入当前证件照历史。
+const LEGACY_FORMAL_WEAR_SIZE_CODE = '__formal_wear__';
 
 module.exports = {
   create(payload) {
@@ -34,7 +35,7 @@ module.exports = {
       where: {
         task_id: taskId,
         user_id: userId,
-        size_code: { [Op.ne]: FORMAL_WEAR_SIZE_CODE }
+        size_code: { [Op.ne]: LEGACY_FORMAL_WEAR_SIZE_CODE }
       }
     });
   },
@@ -42,7 +43,7 @@ module.exports = {
   findHistoryByUserId(userId, { page, pageSize, status } = {}) {
     const where = {
       user_id: userId,
-      size_code: { [Op.ne]: FORMAL_WEAR_SIZE_CODE }
+      size_code: { [Op.ne]: LEGACY_FORMAL_WEAR_SIZE_CODE }
     };
 
     if (status) {

@@ -12,10 +12,11 @@ Base URL: `/api`
 - GET `/auth/me`
 - POST `/upload`
 - POST `/images/generate`
-- POST `/formal-wear/tasks`
-- POST `/formal-wear/process`
-- GET `/formal-wear/history?page=1&pageSize=10`
-- GET `/formal-wear/tasks/:taskId`
+- POST `/formal-wear/tasks` (已下线兼容接口)
+- POST `/formal-wear/process` (已下线兼容接口)
+- GET `/formal-wear/history?page=1&pageSize=10` (已下线兼容接口)
+- GET `/formal-wear/tasks/:taskId` (已下线兼容接口)
+- GET `/formal-wear/tasks/:taskId/edit-draft` (已下线兼容接口)
 - GET `/tasks/:taskId`
 - GET `/images/history?page=1&pageSize=10`
 - GET `/images/:imageId/detail`
@@ -29,7 +30,6 @@ Base URL: `/api`
 
 ## Notes
 
-- `/home/config` continues to return the same top-level structure with `mainCards` and `quickEntries`; current product semantics keep only one quick entry: `换装`, while preserving the existing top-level structure and jump semantics.
-- `/home/templates` remains available and keeps the `tabs + templates` response structure for front-end local filtering.
-
-- `/formal-wear/tasks` accepts multipart form-data and is tolerant of common front-end upload field names; it normalizes `gender/style/color` common aliases and treats missing `enhance` as `false`. `/formal-wear/process` is kept as a compatibility alias.
+- `/home/config` 保持 `mainCards + quickEntries` 结构不变；换装入口已移除，`quickEntries` 为空数组。
+- `/home/templates` 保持 `tabs + templates` 返回结构不变。
+- 所有 `/formal-wear/*` 兼容接口统一返回 HTTP 410 与提示文案：`该功能已下线`。

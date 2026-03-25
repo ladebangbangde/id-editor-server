@@ -7,9 +7,7 @@ const TOOL_TO_BUSINESS_ERROR = {
   IMAGE_TOO_SMALL: { httpStatus: 400, businessCode: 1003, message: '图片尺寸过小' },
   INVALID_ARGUMENT: { httpStatus: 400, businessCode: 1006, message: '参数非法' },
   INCOMPLETE_SHOULDER_NECK: { httpStatus: 400, businessCode: 1105, message: '肩颈区域不完整' },
-  UNSUITABLE_FORMAL_WEAR_IMAGE: { httpStatus: 400, businessCode: 1106, message: '图片不适合换装' },
-  PROCESS_FAILED: { httpStatus: 502, businessCode: 2003, message: '图像处理失败' },
-  FORMAL_WEAR_FAILED: { httpStatus: 502, businessCode: 2101, message: '换装生成失败' }
+  PROCESS_FAILED: { httpStatus: 502, businessCode: 2003, message: '图像处理失败' }
 };
 
 const DEFAULT_SIZE_SOURCE_TYPE = TOOL_SOURCE_TYPES.SCENE;
@@ -22,9 +20,7 @@ const DEFAULT_FAILURE_SUGGESTIONS = {
   IMAGE_TOO_SMALL: ['请上传分辨率更高、头像区域更清晰的照片'],
   INVALID_ARGUMENT: ['请检查参数后重试'],
   INCOMPLETE_SHOULDER_NECK: ['请上传肩颈完整、人物居中的正面照片'],
-  UNSUITABLE_FORMAL_WEAR_IMAGE: ['请上传清晰、光线均匀、无遮挡的正面半身照'],
-  PROCESS_FAILED: ['请上传清晰、正面、完整的人像照片后重试'],
-  FORMAL_WEAR_FAILED: ['请更换一张肩颈完整的清晰人像后重试']
+  PROCESS_FAILED: ['请上传清晰、正面、完整的人像照片后重试']
 };
 
 function unique(values = []) {
@@ -251,7 +247,6 @@ function buildFailureDetails({ error, payload, fallbackMessage, errorKey } = {})
 }
 
 function inferBusinessErrorKey(error, options = {}) {
-  const scenario = options.scenario || null;
   const toolCode = pickFirstString(error?.toolCode, error?.payload?.error?.code, error?.payload?.code);
   if (toolCode && TOOL_TO_BUSINESS_ERROR[toolCode]) return toolCode;
 
@@ -260,12 +255,9 @@ function inferBusinessErrorKey(error, options = {}) {
   if (/multiple\s+faces|more than one face|too many faces|多人脸/.test(text)) return 'MULTIPLE_FACES_DETECTED';
   if (/no face|face not detected|face not found|未检测到/.test(text)) return 'NO_FACE_DETECTED';
   if (/shoulder|neck|肩颈|肩部|脖子|upper body incomplete/.test(text)) return 'INCOMPLETE_SHOULDER_NECK';
-  if (/not suitable|unsuitable|不适合换装|不适合西装|pose issue|遮挡严重|半身不完整/.test(text)) return 'UNSUITABLE_FORMAL_WEAR_IMAGE';
   if (/too small|image too small|尺寸过小/.test(text)) return 'IMAGE_TOO_SMALL';
   if (/invalid image|not a valid image|unsupported image|文件不是合法图片/.test(text)) return 'INVALID_IMAGE';
   if (/invalid|sceneid|scenekey|sizekey|background|layout|argument|source.?type|photo.?size|color|gender|style|formal/.test(text)) return 'INVALID_ARGUMENT';
-  if (/formal.?wear/.test(text) && /failed|error|unsuccessful/.test(text)) return 'FORMAL_WEAR_FAILED';
-  if (scenario === 'formalWear' && /failed|error while processing|generate.*failed|process.*failed/.test(text)) return 'FORMAL_WEAR_FAILED';
   if (/failed|error while processing|generate.*failed|process.*failed/.test(text)) return 'PROCESS_FAILED';
   return null;
 }
@@ -410,64 +402,6 @@ function mapToolGenerateResult(response = {}) {
   };
 }
 
-function mapToolFormalWearResult(response = {}) {
-  const data = unwrapToolData(response) || {};
-  const output = data.output && typeof data.output === 'object' ? data.output : {};
-  const files = data.files && typeof data.files === 'object' ? data.files : {};
-  const warnings = normalizeWarnings(data.warnings || output.warnings);
-  const qualityStatus = normalizeQualityStatus(data.qualityStatus || output.qualityStatus) || 'PASSED';
-  const qualityMessage = pickFirstString(data.qualityMessage, output.qualityMessage, data.message, response.message)
-    || (qualityStatus === 'PASSED' ? '换装结果生成成功' : '请确认换装结果');
-
-  return {
-    taskId: pickFirstString(data.taskId, data.imageId),
-    previewUrl: pickOutputPath(
-      data.previewUrl,
-      data.previewPath,
-      data.preview,
-      output.previewUrl,
-      output.previewPath,
-      output.preview,
-      files.preview,
-      files.low,
-      files.standard
-    ),
-    hdUrl: pickOutputPath(
-      data.hdUrl,
-      data.resultUrl,
-      data.outputUrl,
-      data.imageUrl,
-      data.hdPath,
-      output.hdUrl,
-      output.resultUrl,
-      output.outputUrl,
-      output.imageUrl,
-      files.hd,
-      files.result,
-      files.output,
-      files.image
-    ),
-    gender: pickFirstString(data.gender, output.gender),
-    style: pickFirstString(data.style, output.style),
-    color: pickFirstString(data.color, data.backgroundColor, output.color, output.backgroundColor),
-    warnings,
-    qualityStatus,
-    qualityMessage,
-    raw: data
-  };
-}
-
-function buildFormalWearPayload({ storedImagePath, gender, style, color, enhance }) {
-  return {
-    imagePath: storedImagePath,
-    gender,
-    style,
-    color,
-    enhance: !!enhance,
-    saveOutput: true
-  };
-}
-
 function buildQualitySummary(detect = {}, generate = {}) {
   const messages = unique([
     ...normalizeWarnings(generate.warnings),
@@ -551,11 +485,9 @@ module.exports = {
   mapToolErrorToBusiness,
   mapToolDetectResult,
   mapToolGenerateResult,
-  mapToolFormalWearResult,
   mapToolSpecs,
   buildQualitySummary,
   buildGeneratePhotoPayload,
-  buildFormalWearPayload,
   buildFailureDetails,
   inferBusinessErrorKey
 };
