@@ -26,7 +26,7 @@ module.exports = {
   }),
 
   history: asyncHandler(async (req, res) => {
-    const result = await photoService.getPhotoHistory(req.user.id, req.query);
+    const result = await photoService.getPhotoHistory(req.user, req.query);
     return success(res, result, 'success');
   }),
 

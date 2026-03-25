@@ -35,19 +35,25 @@ module.exports = {
       where: {
         task_id: taskId,
         user_id: userId,
-        size_code: { [Op.ne]: LEGACY_FORMAL_WEAR_SIZE_CODE }
+        [Op.or]: [
+          { size_code: { [Op.ne]: LEGACY_FORMAL_WEAR_SIZE_CODE } },
+          { size_code: { [Op.is]: null } }
+        ]
       }
     });
   },
 
-  findHistoryByUserId(userId, { page, pageSize, status } = {}) {
+  findHistoryByUserId(userId, { page, pageSize, statuses } = {}) {
     const where = {
       user_id: userId,
-      size_code: { [Op.ne]: LEGACY_FORMAL_WEAR_SIZE_CODE }
+      [Op.or]: [
+        { size_code: { [Op.ne]: LEGACY_FORMAL_WEAR_SIZE_CODE } },
+        { size_code: { [Op.is]: null } }
+      ]
     };
 
-    if (status) {
-      where.status = status;
+    if (Array.isArray(statuses) && statuses.length > 0) {
+      where.status = statuses.length === 1 ? statuses[0] : { [Op.in]: statuses };
     }
 
     return PhotoTask.findAndCountAll({
@@ -56,5 +62,7 @@ module.exports = {
       offset: (page - 1) * pageSize,
       limit: pageSize
     });
-  }
+  },
+
+  LEGACY_FORMAL_WEAR_SIZE_CODE
 };

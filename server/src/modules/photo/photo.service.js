@@ -59,9 +59,22 @@ function normalizePaginationNumber(value, fallback) {
 }
 
 function normalizeHistoryStatus(status) {
-  if (!status) return null;
+  if (!status) return { raw: null, statuses: null };
   const normalized = String(status).trim().toUpperCase();
-  return normalized || null;
+  if (!normalized) return { raw: null, statuses: null };
+
+  const statusAliasMap = {
+    COMPLETED: ['SUCCESS'],
+    FINISHED: ['SUCCESS'],
+    DONE: ['SUCCESS'],
+    ALL: null
+  };
+
+  const mappedStatuses = statusAliasMap[normalized] ?? [normalized];
+  return {
+    raw: normalized,
+    statuses: mappedStatuses
+  };
 }
 
 function buildImageMeta(url, sizeDefinition, purpose) {
@@ -222,6 +235,13 @@ function assertDetectResult(detectResult, taskId) {
 
 async function loadRuntimeSpecs() {
   return getPhotoSpecs();
+}
+
+function isLegacyFormalWearTask(task) {
+  if (!task) return false;
+  if (task.size_code === photoRepository.LEGACY_FORMAL_WEAR_SIZE_CODE) return true;
+  const mode = task.request_payload?.mode;
+  return typeof mode === 'string' && mode.toLowerCase() === 'formalwear';
 }
 
 module.exports = {
@@ -418,20 +438,64 @@ module.exports = {
     }
   },
 
-  async getPhotoHistory(userId, query = {}) {
+  async getPhotoHistory(user, query = {}) {
+    const userId = user?.id;
     const page = normalizePaginationNumber(query.page, 1);
     const pageSize = normalizePaginationNumber(query.pageSize, 10);
-    const status = normalizeHistoryStatus(query.status);
+    const normalizedStatus = normalizeHistoryStatus(query.status);
+    const statusFilters = normalizedStatus.statuses;
+
+    logger.info('photo history request user context', {
+      userId: userId || null,
+      openid: user?.openid || null,
+      unionid: user?.unionid || null,
+      accountId: user?.accountId || null
+    });
+    logger.info('photo history query conditions', {
+      userId: userId || null,
+      page,
+      pageSize,
+      statusRaw: normalizedStatus.raw,
+      statusFilters: statusFilters || []
+    });
 
     const result = await photoRepository.findHistoryByUserId(userId, {
       page,
       pageSize,
-      status
+      statuses: statusFilters
+    });
+    logger.info('photo history db raw result', {
+      userId: userId || null,
+      dbTotal: result.count,
+      dbRows: result.rows.length
+    });
+
+    const filteredRows = result.rows.filter((task) => {
+      if (isLegacyFormalWearTask(task)) {
+        logger.info('photo history record filtered', {
+          taskId: task.task_id,
+          reason: 'legacy_formal_wear_task'
+        });
+        return false;
+      }
+      return true;
+    });
+    logger.info('photo history service filtered result', {
+      userId: userId || null,
+      beforeFilter: result.rows.length,
+      afterFilter: filteredRows.length
     });
 
     const specs = await loadRuntimeSpecs();
+    const viewList = filteredRows.map((task) => buildPhotoTaskView(task, specs));
+    logger.info('photo history final response result', {
+      userId: userId || null,
+      beforeViewTransform: filteredRows.length,
+      finalListCount: viewList.length
+    });
+
     return {
-      list: result.rows.map((task) => buildPhotoTaskView(task, specs)),
+      list: viewList,
       total: result.count,
       page,
       pageSize
