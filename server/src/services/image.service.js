@@ -5,6 +5,7 @@ const { TASK_STATUS } = require('../constants/status');
 const generateIdPhoto = require('./image-pipeline/generate-id-photo');
 const generatePrintLayout = require('./image-pipeline/generate-print-layout');
 const { normalizeAssetPath } = require('../utils/asset-url');
+const { toAbsolutePublicUrl } = require('../utils/public-url');
 
 function buildImageMeta(url, width, height, purpose) {
   if (!url) return null;
@@ -16,37 +17,39 @@ function buildImageMeta(url, width, height, purpose) {
   };
 }
 
-function serializeImageResult(result) {
+function serializeImageResult(result, req) {
   if (!result) return result;
 
   const serialized = typeof result.toJSON === 'function' ? result.toJSON() : { ...result };
-  const previewUrl = normalizeAssetPath(serialized.preview_url);
-  const hdUrl = normalizeAssetPath(serialized.hd_url);
-  const printUrl = normalizeAssetPath(serialized.print_url);
+  const previewUrl = toAbsolutePublicUrl(normalizeAssetPath(serialized.preview_url), req);
+  const hdUrl = toAbsolutePublicUrl(normalizeAssetPath(serialized.hd_url), req);
+  const printUrl = toAbsolutePublicUrl(normalizeAssetPath(serialized.print_url), req);
+  const stablePreviewUrl = previewUrl || hdUrl || null;
 
   return {
     ...serialized,
-    preview_url: previewUrl,
+    preview_url: stablePreviewUrl,
     hd_url: hdUrl,
     print_url: printUrl,
-    previewUrl,
+    previewUrl: stablePreviewUrl,
+    thumbnailUrl: stablePreviewUrl,
     hdUrl,
     // 兼容历史客户端：resultUrl 继续返回高清图，后续统一使用 hdUrl
     resultUrl: hdUrl,
     printUrl,
     printLayoutUrl: printUrl,
-    previewMeta: buildImageMeta(previewUrl, serialized.pixel_width, serialized.pixel_height, 'preview'),
+    previewMeta: buildImageMeta(stablePreviewUrl, serialized.pixel_width, serialized.pixel_height, 'preview'),
     hdMeta: buildImageMeta(hdUrl, serialized.pixel_width, serialized.pixel_height, 'print')
   };
 }
 
-function serializeImage(image) {
+function serializeImage(image, req) {
   if (!image) return image;
 
   const serialized = typeof image.toJSON === 'function' ? image.toJSON() : { ...image };
-  const originalUrl = normalizeAssetPath(serialized.original_url);
+  const originalUrl = toAbsolutePublicUrl(normalizeAssetPath(serialized.original_url), req);
   const imageResults = Array.isArray(serialized.ImageResults)
-    ? serialized.ImageResults.map(serializeImageResult)
+    ? serialized.ImageResults.map((item) => serializeImageResult(item, req))
     : serialized.ImageResults;
 
   return {
@@ -58,7 +61,7 @@ function serializeImage(image) {
 }
 
 module.exports = {
-  async generate(userId, payload) {
+  async generate(userId, payload, req) {
     const image = await Image.findByPk(payload.imageId);
     if (!image || image.user_id !== userId) throw new AppError('Image not found', 404);
     let widthMm; let heightMm; let widthPx; let heightPx;
@@ -77,18 +80,18 @@ module.exports = {
       if (payload.printLayoutType) printResult = await generatePrintLayout(result.hdPath, payload.printLayoutType);
       const imageResult = await ImageResult.create({ image_id: image.id, task_id: task.id, preview_url: normalizeAssetPath(result.previewUrl), hd_url: normalizeAssetPath(result.hdUrl), print_url: normalizeAssetPath(printResult.printUrl), background_color: payload.backgroundColor || 'white', width_mm: widthMm, height_mm: heightMm, pixel_width: widthPx, pixel_height: heightPx, quality_status: result.qualityStatus });
       await task.update({ status: TASK_STATUS.SUCCESS, progress: 100, finished_at: new Date() });
-      return { task, imageResult: serializeImageResult(imageResult) };
+      return { task, imageResult: serializeImageResult(imageResult, req) };
     } catch (error) {
       await task.update({ status: TASK_STATUS.FAILED, error_message: error.message, progress: 100, finished_at: new Date() });
       throw error;
     }
   },
-  async history(userId, page = 1, pageSize = 10) {
+  async history(userId, page = 1, pageSize = 10, req) {
     const result = await Image.findAndCountAll({ where: { user_id: userId }, order: [['created_at', 'DESC']], offset: (page - 1) * pageSize, limit: pageSize, include: [{ model: ImageResult }] });
-    return { ...result, rows: result.rows.map(serializeImage) };
+    return { ...result, rows: result.rows.map((item) => serializeImage(item, req)) };
   },
-  async detail(imageId, userId) {
+  async detail(imageId, userId, req) {
     const image = await Image.findOne({ where: { id: imageId, user_id: userId }, include: [{ model: ImageResult }, { model: ImageTask }] });
-    return serializeImage(image);
+    return serializeImage(image, req);
   }
 };
