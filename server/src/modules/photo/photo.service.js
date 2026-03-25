@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require('uuid');
 const AppError = require('../../utils/app-error');
 const appConfig = require('../../config/app.config');
 const logger = require('../../utils/logger');
+const fs = require('fs');
 const idEditorToolClient = require('../../integrations/id-editor-tool/id-editor-tool.client');
 const {
   mapToolErrorToBusiness,
@@ -15,12 +16,12 @@ const {
 } = require('../../integrations/id-editor-tool/id-editor-tool.mapper');
 const photoRepository = require('./photo.repository');
 const { getPhotoSpecs, mergeSpecs, validateProcessPhotoPayload, normalizeSizeCode } = require('./dto/process-photo.dto');
-const { toToolSharedAbsolutePath } = require('../../utils/file-helper');
+const { toToolSharedAbsolutePath, absoluteUploadPath, relativeUploadPath, ensureDir } = require('../../utils/file-helper');
+const { FOLDERS } = require('../../constants/file');
+const { toAbsolutePublicUrl } = require('../../utils/public-url');
 
-function buildAbsoluteUrl(urlPath) {
-  if (!urlPath) return null;
-  if (/^https?:\/\//i.test(urlPath)) return urlPath;
-  return new URL(urlPath.startsWith('/') ? urlPath : `/${urlPath}`, `${appConfig.baseUrl}/`).toString();
+function buildAbsoluteUrl(urlPath, req) {
+  return toAbsolutePublicUrl(urlPath, req);
 }
 
 function buildToolFilePath(filePath) {
@@ -94,12 +95,16 @@ function buildSizeDefinition(task, specs) {
   };
 }
 
-function buildPhotoTaskView(task, specs) {
+function normalizePreviewUrl(previewUrl, hdUrl) {
+  return previewUrl || hdUrl || null;
+}
+
+function buildPhotoTaskView(task, specs, req) {
   const warnings = Array.isArray(task.warnings) ? task.warnings : [];
-  const sourceUrl = task.source_url;
-  const hdUrl = task.result_url;
-  const previewUrl = task.preview_url;
-  const printLayoutUrl = task.response_payload?.generate?.data?.printUrl || null;
+  const sourceUrl = toAbsolutePublicUrl(task.source_url, req);
+  const hdUrl = toAbsolutePublicUrl(task.result_url, req);
+  const previewUrl = normalizePreviewUrl(toAbsolutePublicUrl(task.preview_url, req), hdUrl);
+  const printLayoutUrl = toAbsolutePublicUrl(task.response_payload?.summary?.printLayoutUrl || task.response_payload?.generate?.data?.printUrl || null, req);
   const requestPayload = task.request_payload?.clientRequest || {};
   const sizeDefinition = buildSizeDefinition(task, specs);
   const originalRequestedSizeKey = requestPayload.sizeCode || task.request_payload?.originalRequestedSizeKey || task.size_code;
@@ -113,7 +118,10 @@ function buildPhotoTaskView(task, specs) {
     originalUrl: sourceUrl,
     sourceFilePath: buildSourceFilePath(sourceUrl) || sourceUrl,
     previewUrl,
+    thumbnailUrl: previewUrl,
+    preview_url: previewUrl,
     hdUrl,
+    hd_url: hdUrl,
     // 兼容历史客户端：resultUrl 继续返回高清图，后续统一使用 hdUrl
     resultUrl: hdUrl,
     printLayoutUrl,
@@ -148,6 +156,47 @@ function buildPhotoTaskView(task, specs) {
       nextRoute: '/pages/photo/edit/index'
     }
   };
+}
+
+async function persistToolAsset(rawOutputUrl, folder) {
+  if (!rawOutputUrl || !folder) return null;
+  const normalized = String(rawOutputUrl).trim();
+  if (!normalized) return null;
+  const fileName = path.basename(normalized.split('?')[0]);
+  if (!fileName || fileName === '/' || fileName === '.') return null;
+
+  const destination = absoluteUploadPath(folder, fileName);
+  await ensureDir(path.dirname(destination));
+
+  const candidates = [];
+  if (path.isAbsolute(normalized)) candidates.push(normalized);
+
+  let pathname = normalized;
+  if (/^https?:\/\//i.test(normalized)) {
+    try {
+      pathname = new URL(normalized).pathname || normalized;
+    } catch (_error) {
+      pathname = normalized;
+    }
+  }
+
+  const cleanPathname = pathname.split('?')[0];
+  if (cleanPathname.startsWith('/uploads/')) {
+    candidates.push(path.join(appConfig.toolSharedUploadRoot, cleanPathname.replace(/^\/uploads\//, '')));
+  }
+  if (cleanPathname.startsWith('/')) {
+    candidates.push(path.join(appConfig.toolSharedUploadRoot, cleanPathname.replace(/^\/+/, '')));
+  }
+
+  for (const source of candidates) {
+    if (!source || source === destination) continue;
+    if (fs.existsSync(source)) {
+      await fs.promises.copyFile(source, destination);
+      return relativeUploadPath(folder, fileName);
+    }
+  }
+
+  return normalized;
 }
 
 function createStructuredFailureData({ taskId, message, reasons, suggestions }) {
@@ -242,7 +291,7 @@ module.exports = {
     };
   },
 
-  async processPhoto({ user, file, payload }) {
+  async processPhoto({ user, file, payload, req }) {
     await this.assertUserCanProcess(user);
 
     const specs = await loadRuntimeSpecs();
@@ -260,7 +309,7 @@ module.exports = {
     const selectedSizeDefinition = validation.resolvedSize?.definition
       || mergedSpecs.sizeDefinitions.find((item) => item.sizeCode === requestPayload.sizeCode)
       || null;
-    const sourceUrl = buildAbsoluteUrl(`/uploads/original/${path.basename(file.path)}`);
+    const sourceUrl = buildAbsoluteUrl(`/uploads/original/${path.basename(file.path)}`, req);
     const toolFilePath = buildToolFilePath(file.path);
     const localTaskId = `photo_${uuidv4().replace(/-/g, '')}`;
 
@@ -335,8 +384,12 @@ module.exports = {
         detectResult.pass === false ? detectResult.message : null,
         ...(generateResult.warnings || [])
       ]);
-      const previewUrl = idEditorToolClient.createAbsoluteOutputUrl(generateResult.previewUrl);
-      const hdUrl = idEditorToolClient.createAbsoluteOutputUrl(generateResult.hdUrl);
+      const persistedPreviewPath = await persistToolAsset(generateResult.previewUrl, FOLDERS.PREVIEW);
+      const persistedHdPath = await persistToolAsset(generateResult.hdUrl, FOLDERS.HD);
+      const persistedPrintPath = await persistToolAsset(generateResult.printUrl, FOLDERS.PRINT);
+      const previewUrl = buildAbsoluteUrl(persistedPreviewPath || generateResult.previewUrl || generateResult.hdUrl, req);
+      const hdUrl = buildAbsoluteUrl(persistedHdPath || generateResult.hdUrl, req);
+      const printLayoutUrl = buildAbsoluteUrl(persistedPrintPath || generateResult.printUrl, req);
 
       const updatedRecord = await photoRepository.markSuccess(taskRecord.id, {
         task_id: generateResult.taskId || taskRecord.task_id,
@@ -354,7 +407,7 @@ module.exports = {
           summary: {
             previewUrl,
             hdUrl,
-            printLayoutUrl: idEditorToolClient.createAbsoluteOutputUrl(generateResult.printUrl),
+            printLayoutUrl,
             sizeDefinition: selectedSizeDefinition,
             originalRequestedSizeKey: requestPayload.originalRequestedSizeKey,
             normalizedSizeCode: requestPayload.normalizedSizeCode,
@@ -365,7 +418,7 @@ module.exports = {
         error_message: null
       });
 
-      return buildPhotoTaskView(updatedRecord, mergedSpecs);
+      return buildPhotoTaskView(updatedRecord, mergedSpecs, req);
     } catch (error) {
       const mappedError = error instanceof AppError
         ? {
@@ -418,7 +471,7 @@ module.exports = {
     }
   },
 
-  async getPhotoHistory(userId, query = {}) {
+  async getPhotoHistory(userId, query = {}, req) {
     const page = normalizePaginationNumber(query.page, 1);
     const pageSize = normalizePaginationNumber(query.pageSize, 10);
     const status = normalizeHistoryStatus(query.status);
@@ -431,31 +484,31 @@ module.exports = {
 
     const specs = await loadRuntimeSpecs();
     return {
-      list: result.rows.map((task) => buildPhotoTaskView(task, specs)),
+      list: result.rows.map((task) => buildPhotoTaskView(task, specs, req)),
       total: result.count,
       page,
       pageSize
     };
   },
 
-  async getTaskDetail(taskId, userId) {
+  async getTaskDetail(taskId, userId, req) {
     const task = await photoRepository.findByTaskId(taskId, userId);
     if (!task) {
       throw new AppError('任务不存在', 404, null, 404);
     }
 
     const specs = await loadRuntimeSpecs();
-    return buildPhotoTaskView(task, specs);
+    return buildPhotoTaskView(task, specs, req);
   },
 
-  async getTaskEditDraft(taskId, userId) {
+  async getTaskEditDraft(taskId, userId, req) {
     const task = await photoRepository.findByTaskId(taskId, userId);
     if (!task) {
       throw new AppError('任务不存在', 404, null, 404);
     }
 
     const specs = await loadRuntimeSpecs();
-    return buildPhotoTaskView(task, specs).editDraft;
+    return buildPhotoTaskView(task, specs, req).editDraft;
   },
 
   async assertUserCanProcess(user) {
