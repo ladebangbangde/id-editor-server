@@ -1,4 +1,5 @@
 const { SPEC_CATEGORIES, SPEC_TEMPLATES } = require('../../../constants/spec-data');
+const logger = require('../../../utils/logger');
 
 const SUPPORTED_BACKGROUND_COLORS = ['blue', 'white', 'red'];
 const SUPPORTED_PAPERS = ['six'];
@@ -260,6 +261,16 @@ function mergeSpecs(dynamicSpecs = {}) {
 function validateProcessPhotoPayload(payload = {}, file, specs = getPhotoSpecs()) {
   const normalizedSpecs = mergeSpecs(specs);
   const normalizedPayload = payload && typeof payload === 'object' ? payload : {};
+  const rawSizeCode = normalizedPayload.sizeCode;
+  const rawBackgroundColor = normalizedPayload.backgroundColor;
+  const rawEnhance = normalizedPayload.enhance;
+
+  logger.info('validateProcessPhotoPayload input', {
+    sizeCode: rawSizeCode,
+    backgroundColor: rawBackgroundColor,
+    enhance: rawEnhance,
+    hasFile: Boolean(file)
+  });
 
   if (!file) {
     return {
@@ -268,80 +279,43 @@ function validateProcessPhotoPayload(payload = {}, file, specs = getPhotoSpecs()
       businessCode: 1001,
       reason: 'FILE_REQUIRED',
       details: {
-        missingFields: ['file'],
-        typeErrors: [],
-        enumErrors: []
+        hasFile: false,
+        missingFields: ['file']
       }
     };
   }
 
-  const missingFields = [];
-  const typeErrors = [];
-  const enumErrors = [];
-
-  if (normalizedPayload.sizeCode === undefined || normalizedPayload.sizeCode === null || String(normalizedPayload.sizeCode).trim() === '') {
-    missingFields.push('sizeCode');
-  } else if (typeof normalizedPayload.sizeCode !== 'string') {
-    typeErrors.push({
-      field: 'sizeCode',
-      expected: 'string',
-      actual: typeof normalizedPayload.sizeCode,
-      value: normalizedPayload.sizeCode
-    });
-  }
-
-  if (normalizedPayload.backgroundColor === undefined || normalizedPayload.backgroundColor === null || String(normalizedPayload.backgroundColor).trim() === '') {
-    missingFields.push('backgroundColor');
-  } else if (typeof normalizedPayload.backgroundColor !== 'string') {
-    typeErrors.push({
-      field: 'backgroundColor',
-      expected: 'string',
-      actual: typeof normalizedPayload.backgroundColor,
-      value: normalizedPayload.backgroundColor
-    });
-  }
-
-  if (normalizedPayload.enhance !== undefined
-    && typeof normalizedPayload.enhance !== 'boolean'
-    && !(typeof normalizedPayload.enhance === 'string' && ['true', 'false'].includes(normalizedPayload.enhance.toLowerCase()))) {
-    typeErrors.push({
-      field: 'enhance',
-      expected: 'boolean | \"true\" | \"false\"',
-      actual: typeof normalizedPayload.enhance,
-      value: normalizedPayload.enhance
-    });
-  }
-
-  if (missingFields.length > 0 || typeErrors.length > 0) {
+  if (rawSizeCode === undefined || rawSizeCode === null || String(rawSizeCode).trim() === '') {
     return {
       valid: false,
-      message: '参数非法',
+      message: '参数非法：缺少 sizeCode',
       businessCode: 1006,
-      reason: 'INVALID_REQUIRED_FIELDS',
+      reason: 'SIZE_CODE_REQUIRED',
       details: {
-        missingFields,
-        typeErrors,
-        enumErrors
+        sizeCode: rawSizeCode,
+        supportedCanonicalSizeCodes: getSupportedCanonicalSizeCodes(normalizedSpecs)
       }
     };
   }
 
-  const resolvedSize = resolveSizeCode(normalizedPayload.sizeCode, normalizedSpecs);
+  const resolvedSize = resolveSizeCode(rawSizeCode, normalizedSpecs);
   if (!resolvedSize.ok) {
+    const supportedCanonicalSizeCodes = getSupportedCanonicalSizeCodes(normalizedSpecs);
+    logger.warn('validateProcessPhotoPayload sizeCode invalid', {
+      originalRequestedSizeKey: resolvedSize.originalRequestedSizeKey,
+      normalizedSizeCode: resolvedSize.normalizedSizeCode,
+      supportedCanonicalSizeCodes
+    });
+
     return {
       valid: false,
       message: resolvedSize.message,
       businessCode: 1006,
       reason: resolvedSize.reason || 'INVALID_SIZE_CODE',
       details: {
-        missingFields,
-        typeErrors,
-        enumErrors: [{
-          field: 'sizeCode',
-          value: normalizedPayload.sizeCode,
-          allowedValues: getSupportedCanonicalSizeCodes(normalizedSpecs),
-          reason: resolvedSize.reason || 'INVALID_SIZE_CODE'
-        }]
+        originalRequestedSizeKey: resolvedSize.originalRequestedSizeKey,
+        normalizedSizeCode: resolvedSize.normalizedSizeCode,
+        supportedCanonicalSizeCodes
       },
       data: {
         originalRequestedSizeKey: resolvedSize.originalRequestedSizeKey,
@@ -350,22 +324,32 @@ function validateProcessPhotoPayload(payload = {}, file, specs = getPhotoSpecs()
     };
   }
 
-  if (!normalizedSpecs.backgroundColors.includes(normalizedPayload.backgroundColor)) {
-    enumErrors.push({
-      field: 'backgroundColor',
-      value: normalizedPayload.backgroundColor,
-      allowedValues: normalizedSpecs.backgroundColors,
-      reason: 'UNSUPPORTED_BACKGROUND_COLOR'
+  if (rawBackgroundColor === undefined || rawBackgroundColor === null || String(rawBackgroundColor).trim() === '') {
+    return {
+      valid: false,
+      message: '参数非法：缺少 backgroundColor',
+      businessCode: 1006,
+      reason: 'BACKGROUND_COLOR_REQUIRED',
+      details: {
+        backgroundColor: rawBackgroundColor,
+        supportedBackgroundColors: normalizedSpecs.backgroundColors
+      }
+    };
+  }
+
+  if (!normalizedSpecs.backgroundColors.includes(rawBackgroundColor)) {
+    logger.warn('validateProcessPhotoPayload backgroundColor invalid', {
+      backgroundColor: rawBackgroundColor
     });
+
     return {
       valid: false,
       message: '参数非法：不支持的 backgroundColor',
       businessCode: 1006,
       reason: 'UNSUPPORTED_BACKGROUND_COLOR',
       details: {
-        missingFields,
-        typeErrors,
-        enumErrors
+        backgroundColor: rawBackgroundColor,
+        supportedBackgroundColors: normalizedSpecs.backgroundColors
       }
     };
   }
@@ -377,8 +361,8 @@ function validateProcessPhotoPayload(payload = {}, file, specs = getPhotoSpecs()
       normalizedSizeCode: resolvedSize.normalizedSizeCode,
       toolSizeKey: resolvedSize.toolSizeKey,
       sizeCode: resolvedSize.normalizedSizeCode,
-      backgroundColor: normalizedPayload.backgroundColor,
-      enhance: normalizeBoolean(normalizedPayload.enhance)
+      backgroundColor: rawBackgroundColor,
+      enhance: normalizeBoolean(rawEnhance)
     },
     specs: normalizedSpecs,
     resolvedSize
