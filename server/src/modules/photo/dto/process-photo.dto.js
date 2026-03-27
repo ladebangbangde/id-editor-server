@@ -259,17 +259,90 @@ function mergeSpecs(dynamicSpecs = {}) {
 
 function validateProcessPhotoPayload(payload = {}, file, specs = getPhotoSpecs()) {
   const normalizedSpecs = mergeSpecs(specs);
+  const normalizedPayload = payload && typeof payload === 'object' ? payload : {};
 
   if (!file) {
-    return { valid: false, message: '文件为空', businessCode: 1001 };
+    return {
+      valid: false,
+      message: '文件为空',
+      businessCode: 1001,
+      reason: 'FILE_REQUIRED',
+      details: {
+        missingFields: ['file'],
+        typeErrors: [],
+        enumErrors: []
+      }
+    };
   }
 
-  const resolvedSize = resolveSizeCode(payload.sizeCode, normalizedSpecs);
+  const missingFields = [];
+  const typeErrors = [];
+  const enumErrors = [];
+
+  if (normalizedPayload.sizeCode === undefined || normalizedPayload.sizeCode === null || String(normalizedPayload.sizeCode).trim() === '') {
+    missingFields.push('sizeCode');
+  } else if (typeof normalizedPayload.sizeCode !== 'string') {
+    typeErrors.push({
+      field: 'sizeCode',
+      expected: 'string',
+      actual: typeof normalizedPayload.sizeCode,
+      value: normalizedPayload.sizeCode
+    });
+  }
+
+  if (normalizedPayload.backgroundColor === undefined || normalizedPayload.backgroundColor === null || String(normalizedPayload.backgroundColor).trim() === '') {
+    missingFields.push('backgroundColor');
+  } else if (typeof normalizedPayload.backgroundColor !== 'string') {
+    typeErrors.push({
+      field: 'backgroundColor',
+      expected: 'string',
+      actual: typeof normalizedPayload.backgroundColor,
+      value: normalizedPayload.backgroundColor
+    });
+  }
+
+  if (normalizedPayload.enhance !== undefined
+    && typeof normalizedPayload.enhance !== 'boolean'
+    && !(typeof normalizedPayload.enhance === 'string' && ['true', 'false'].includes(normalizedPayload.enhance.toLowerCase()))) {
+    typeErrors.push({
+      field: 'enhance',
+      expected: 'boolean | \"true\" | \"false\"',
+      actual: typeof normalizedPayload.enhance,
+      value: normalizedPayload.enhance
+    });
+  }
+
+  if (missingFields.length > 0 || typeErrors.length > 0) {
+    return {
+      valid: false,
+      message: '参数非法',
+      businessCode: 1006,
+      reason: 'INVALID_REQUIRED_FIELDS',
+      details: {
+        missingFields,
+        typeErrors,
+        enumErrors
+      }
+    };
+  }
+
+  const resolvedSize = resolveSizeCode(normalizedPayload.sizeCode, normalizedSpecs);
   if (!resolvedSize.ok) {
     return {
       valid: false,
       message: resolvedSize.message,
       businessCode: 1006,
+      reason: resolvedSize.reason || 'INVALID_SIZE_CODE',
+      details: {
+        missingFields,
+        typeErrors,
+        enumErrors: [{
+          field: 'sizeCode',
+          value: normalizedPayload.sizeCode,
+          allowedValues: getSupportedCanonicalSizeCodes(normalizedSpecs),
+          reason: resolvedSize.reason || 'INVALID_SIZE_CODE'
+        }]
+      },
       data: {
         originalRequestedSizeKey: resolvedSize.originalRequestedSizeKey,
         normalizedSizeCode: resolvedSize.normalizedSizeCode
@@ -277,8 +350,24 @@ function validateProcessPhotoPayload(payload = {}, file, specs = getPhotoSpecs()
     };
   }
 
-  if (!normalizedSpecs.backgroundColors.includes(payload.backgroundColor)) {
-    return { valid: false, message: '参数非法：不支持的 backgroundColor', businessCode: 1006 };
+  if (!normalizedSpecs.backgroundColors.includes(normalizedPayload.backgroundColor)) {
+    enumErrors.push({
+      field: 'backgroundColor',
+      value: normalizedPayload.backgroundColor,
+      allowedValues: normalizedSpecs.backgroundColors,
+      reason: 'UNSUPPORTED_BACKGROUND_COLOR'
+    });
+    return {
+      valid: false,
+      message: '参数非法：不支持的 backgroundColor',
+      businessCode: 1006,
+      reason: 'UNSUPPORTED_BACKGROUND_COLOR',
+      details: {
+        missingFields,
+        typeErrors,
+        enumErrors
+      }
+    };
   }
 
   return {
@@ -288,8 +377,8 @@ function validateProcessPhotoPayload(payload = {}, file, specs = getPhotoSpecs()
       normalizedSizeCode: resolvedSize.normalizedSizeCode,
       toolSizeKey: resolvedSize.toolSizeKey,
       sizeCode: resolvedSize.normalizedSizeCode,
-      backgroundColor: payload.backgroundColor,
-      enhance: normalizeBoolean(payload.enhance)
+      backgroundColor: normalizedPayload.backgroundColor,
+      enhance: normalizeBoolean(normalizedPayload.enhance)
     },
     specs: normalizedSpecs,
     resolvedSize

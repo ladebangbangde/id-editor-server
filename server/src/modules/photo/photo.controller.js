@@ -17,6 +17,18 @@ module.exports = {
   }),
 
   process: asyncHandler(async (req, res) => {
+    logger.info('photo process request payload received', {
+      userId: req.user?.id || null,
+      requestBody: req.body || {},
+      receivedFile: req.file
+        ? {
+            fieldName: req.file.fieldname || null,
+            originalName: req.file.originalname || null,
+            mimeType: req.file.mimetype || null,
+            size: req.file.size || null
+          }
+        : null
+    });
     const result = await photoService.processPhoto({
       user: req.user,
       file: req.file,

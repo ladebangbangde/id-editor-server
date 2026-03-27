@@ -299,7 +299,35 @@ module.exports = {
     const specs = await loadRuntimeSpecs();
     const validation = validateProcessPhotoPayload(payload, file, specs);
     if (!validation.valid) {
-      throw new AppError(validation.message, 400, createStructuredFailureData({ taskId: null, message: validation.message }), validation.businessCode);
+      logger.warn('photo process payload validation failed', {
+        userId: user?.id || null,
+        businessCode: validation.businessCode || 1006,
+        reason: validation.reason || null,
+        message: validation.message,
+        details: validation.details || null,
+        requestBody: payload || {},
+        receivedFile: file
+          ? {
+              fieldName: file.fieldname || null,
+              originalName: file.originalname || null,
+              mimeType: file.mimetype || null,
+              size: file.size || null
+            }
+          : null
+      });
+      throw new AppError(
+        validation.message,
+        400,
+        {
+          ...createStructuredFailureData({ taskId: null, message: validation.message }),
+          validation: {
+            reason: validation.reason || null,
+            details: validation.details || null,
+            receivedBody: payload || {}
+          }
+        },
+        validation.businessCode
+      );
     }
 
     if (!file.mimetype || !file.mimetype.startsWith('image/')) {
