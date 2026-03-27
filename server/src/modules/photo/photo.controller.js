@@ -1,5 +1,6 @@
 const photoService = require('./photo.service');
 const { success } = require('../../utils/api-response');
+const logger = require('../../utils/logger');
 
 const asyncHandler = (handler) => async (req, res, next) => {
   try {
@@ -21,6 +22,19 @@ module.exports = {
       file: req.file,
       payload: req.body
     });
+    logger.info('photo api response candidates', {
+      api: 'process',
+      taskId: result.taskId,
+      candidates: Array.isArray(result.candidates)
+        ? result.candidates.map((candidate) => ({
+            candidateId: candidate.candidateId || null,
+            source: candidate.source || null,
+            engine: candidate.engine || null,
+            previewUrl: candidate.previewUrl || null,
+            hdUrl: candidate.hdUrl || null
+          }))
+        : []
+    });
 
     return success(res, result, 'success');
   }),
@@ -32,6 +46,19 @@ module.exports = {
 
   taskDetail: asyncHandler(async (req, res) => {
     const result = await photoService.getTaskDetail(req.params.taskId, req.user.id);
+    logger.info('photo api response candidates', {
+      api: 'taskDetail',
+      taskId: result.taskId,
+      candidates: Array.isArray(result.candidates)
+        ? result.candidates.map((candidate) => ({
+            candidateId: candidate.candidateId || null,
+            source: candidate.source || null,
+            engine: candidate.engine || null,
+            previewUrl: candidate.previewUrl || null,
+            hdUrl: candidate.hdUrl || null
+          }))
+        : []
+    });
     return success(res, result, 'success');
   }),
 

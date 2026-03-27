@@ -347,49 +347,234 @@ function pickOutputPath(...values) {
   return null;
 }
 
+function normalizeCandidateStatus(value) {
+  const normalized = pickFirstString(value)?.toLowerCase();
+  if (!normalized) return null;
+  if (['success', 'passed', 'ok', 'done'].includes(normalized)) return 'SUCCESS';
+  if (['failed', 'error', 'fail'].includes(normalized)) return 'FAILED';
+  if (['processing', 'pending', 'running'].includes(normalized)) return 'PROCESSING';
+  return normalized.toUpperCase();
+}
+
+function inferCandidateSource(candidate = {}, sourceHint = null) {
+  const rawSource = pickFirstString(
+    candidate.source,
+    candidate.engine,
+    candidate.provider,
+    candidate.vendor,
+    candidate.channel,
+    sourceHint
+  );
+  if (!rawSource) return null;
+  const normalized = rawSource.trim().toLowerCase();
+  if (/baidu/.test(normalized)) return 'baidu';
+  if (/local|library|self|repo/.test(normalized)) return 'local';
+  return rawSource;
+}
+
+function normalizeGenerateCandidate(candidate, { sourceHint, index } = {}) {
+  if (!candidate || typeof candidate !== 'object') return null;
+
+  const previewUrl = pickOutputPath(
+    candidate.previewUrl,
+    candidate.imageUrl,
+    candidate.thumbnailUrl,
+    candidate.preview,
+    candidate.image,
+    candidate.lowResUrl
+  );
+  const hdUrl = pickOutputPath(
+    candidate.hdUrl,
+    candidate.resultUrl,
+    candidate.outputUrl,
+    candidate.imageUrl,
+    candidate.hd,
+    candidate.result
+  );
+  const source = inferCandidateSource(candidate, sourceHint);
+  const status = normalizeCandidateStatus(candidate.status || candidate.state || candidate.phase);
+  const failureReason = pickFirstString(
+    candidate.failureReason,
+    candidate.errorMessage,
+    candidate.reason,
+    candidate.message,
+    candidate.error?.message
+  );
+  const candidateId = pickFirstString(
+    candidate.candidateId,
+    candidate.id,
+    candidate.key,
+    candidate.name,
+    source ? `${source}_candidate` : null
+  ) || `candidate_${index + 1}`;
+
+  if (!previewUrl && !hdUrl && !failureReason && status !== 'FAILED') return null;
+
+  return {
+    candidateId,
+    source,
+    engine: pickFirstString(candidate.engine, candidate.provider, source),
+    previewUrl,
+    imageUrl: previewUrl || hdUrl || null,
+    hdUrl,
+    resultUrl: hdUrl,
+    status: status || (failureReason ? 'FAILED' : 'SUCCESS'),
+    failureReason: failureReason || null
+  };
+}
+
+function dedupeCandidates(candidates = []) {
+  const result = [];
+  const seen = new Set();
+
+  for (const item of candidates) {
+    if (!item) continue;
+    const key = `${item.candidateId || ''}|${item.source || ''}|${item.previewUrl || ''}|${item.hdUrl || ''}`.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+
+  return result;
+}
+
+function hasBaiduPath(url) {
+  if (!url || typeof url !== 'string') return false;
+  return /baidu/i.test(url);
+}
+
+function buildGenerateCandidates(data = {}, output = {}) {
+  const fromArrays = [
+    ...toArray(data.candidates),
+    ...toArray(output.candidates),
+    ...toArray(data.compareCandidates),
+    ...toArray(output.compareCandidates)
+  ];
+
+  const fromNamedCandidates = [
+    { sourceHint: 'local', value: data.localCandidate || output.localCandidate || data.local || output.local },
+    { sourceHint: 'baidu', value: data.baiduCandidate || output.baiduCandidate || data.baidu || output.baidu }
+  ];
+
+  const fromCompareNamed = data.compare && typeof data.compare === 'object'
+    ? [
+        { sourceHint: 'local', value: data.compare.localCandidate || data.compare.local },
+        { sourceHint: 'baidu', value: data.compare.baiduCandidate || data.compare.baidu }
+      ]
+    : [];
+
+  const normalized = [
+    ...fromArrays.map((item, index) => normalizeGenerateCandidate(item, { index })),
+    ...fromNamedCandidates.map((entry, index) => normalizeGenerateCandidate(entry.value, { sourceHint: entry.sourceHint, index: fromArrays.length + index })),
+    ...fromCompareNamed.map((entry, index) => normalizeGenerateCandidate(entry.value, { sourceHint: entry.sourceHint, index: fromArrays.length + fromNamedCandidates.length + index }))
+  ].filter(Boolean);
+
+  const candidates = dedupeCandidates(normalized);
+  const hasLocalCandidate = candidates.some((item) => item.source === 'local');
+  const hasBaiduCandidate = candidates.some((item) => item.source === 'baidu');
+
+  if (hasBaiduCandidate && !hasLocalCandidate) {
+    const localFailureReason = pickFirstString(
+      data.localError?.message,
+      data.localFailureReason,
+      data.compare?.localError?.message,
+      output.localError?.message
+    ) || '本地库候选生成失败，未返回可用图片';
+
+    candidates.unshift({
+      candidateId: 'local_candidate',
+      source: 'local',
+      engine: 'local',
+      previewUrl: null,
+      imageUrl: null,
+      hdUrl: null,
+      resultUrl: null,
+      status: 'FAILED',
+      failureReason: localFailureReason
+    });
+  }
+
+  return candidates;
+}
+
 function mapToolGenerateResult(response = {}) {
   const data = unwrapToolData(response) || {};
   const output = data.output && typeof data.output === 'object' ? data.output : {};
   const files = data.files && typeof data.files === 'object' ? data.files : {};
   const size = data.size && typeof data.size === 'object' ? data.size : {};
   const warnings = normalizeWarnings(data.warnings || output.warnings);
+  const candidates = buildGenerateCandidates(data, output);
+  const preferredCandidate = candidates.find((item) => item.source !== 'baidu' && (item.previewUrl || item.hdUrl))
+    || candidates.find((item) => item.previewUrl || item.hdUrl)
+    || null;
+  const fallbackPreviewUrl = preferredCandidate?.previewUrl || preferredCandidate?.imageUrl || null;
+  const fallbackHdUrl = preferredCandidate?.hdUrl || preferredCandidate?.resultUrl || null;
+  const mappedPreviewUrl = pickOutputPath(
+    data.previewUrl,
+    data.previewPath,
+    data.preview,
+    output.previewUrl,
+    output.previewPath,
+    output.preview,
+    files.preview,
+    files.low,
+    files.standard
+  );
+  const mappedHdUrl = pickOutputPath(
+    data.hdUrl,
+    data.resultUrl,
+    data.hdPath,
+    data.outputUrl,
+    data.outputPath,
+    data.imageUrl,
+    data.imagePath,
+    output.hdUrl,
+    output.resultUrl,
+    output.hdPath,
+    output.outputUrl,
+    output.outputPath,
+    output.imageUrl,
+    output.imagePath,
+    output.hd,
+    output.result,
+    files.hd,
+    files.result,
+    files.output,
+    files.image
+  );
+  const previewUrl = fallbackPreviewUrl || mappedPreviewUrl;
+  const hdUrl = fallbackHdUrl || mappedHdUrl;
+  const normalizedCandidates = candidates.length > 0
+    ? candidates.map((item) => {
+        const candidatePreview = item.previewUrl || item.imageUrl || null;
+        const candidateHd = item.hdUrl || item.resultUrl || null;
+        return {
+          ...item,
+          previewUrl: candidatePreview,
+          imageUrl: candidatePreview || candidateHd || null,
+          hdUrl: candidateHd,
+          resultUrl: candidateHd
+        };
+      })
+    : (previewUrl || hdUrl)
+      ? [{
+          candidateId: 'primary_candidate',
+          source: hasBaiduPath(previewUrl) || hasBaiduPath(hdUrl) ? 'baidu' : 'local',
+          engine: null,
+          previewUrl: previewUrl || hdUrl,
+          imageUrl: previewUrl || hdUrl,
+          hdUrl: hdUrl || previewUrl,
+          resultUrl: hdUrl || previewUrl,
+          status: 'SUCCESS',
+          failureReason: null
+        }]
+      : [];
 
   return {
     taskId: pickFirstString(data.taskId, data.imageId),
     imageId: pickFirstString(data.imageId, data.taskId),
-    previewUrl: pickOutputPath(
-      data.previewUrl,
-      data.previewPath,
-      data.preview,
-      output.previewUrl,
-      output.previewPath,
-      output.preview,
-      files.preview,
-      files.low,
-      files.standard
-    ),
-    hdUrl: pickOutputPath(
-      data.hdUrl,
-      data.resultUrl,
-      data.hdPath,
-      data.outputUrl,
-      data.outputPath,
-      data.imageUrl,
-      data.imagePath,
-      output.hdUrl,
-      output.resultUrl,
-      output.hdPath,
-      output.outputUrl,
-      output.outputPath,
-      output.imageUrl,
-      output.imagePath,
-      output.hd,
-      output.result,
-      files.hd,
-      files.result,
-      files.output,
-      files.image
-    ),
+    previewUrl,
+    hdUrl,
     printUrl: pickOutputPath(data.printUrl, output.printUrl, files.print),
     backgroundColor: pickFirstString(data.backgroundColor, output.backgroundColor),
     widthMm: pickFirstNumber(data.widthMm, size.widthMm, data.width, size.width),
@@ -398,6 +583,7 @@ function mapToolGenerateResult(response = {}) {
     pixelHeight: pickFirstNumber(data.pixelHeight, data.heightPx, size.pixelHeight, size.heightPx),
     qualityStatus: normalizeQualityStatus(data.qualityStatus || output.qualityStatus),
     warnings,
+    candidates: normalizedCandidates,
     raw: data
   };
 }

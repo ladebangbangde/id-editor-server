@@ -117,6 +117,36 @@ function buildPhotoTaskView(task, specs) {
   const sizeDefinition = buildSizeDefinition(task, specs);
   const originalRequestedSizeKey = requestPayload.sizeCode || task.request_payload?.originalRequestedSizeKey || task.size_code;
   const normalizedSizeCode = normalizeSizeCode(task.size_code) || task.request_payload?.normalizedSizeCode || task.size_code;
+  const rawCandidates = Array.isArray(task.response_payload?.summary?.candidates) ? task.response_payload.summary.candidates : [];
+  const candidates = rawCandidates.length > 0
+    ? rawCandidates.map((candidate, index) => {
+        const previewUrlCandidate = candidate?.previewUrl || candidate?.imageUrl || null;
+        const hdUrlCandidate = candidate?.hdUrl || candidate?.resultUrl || null;
+        return {
+          candidateId: candidate?.candidateId || `candidate_${index + 1}`,
+          source: candidate?.source || null,
+          engine: candidate?.engine || candidate?.source || null,
+          imageUrl: previewUrlCandidate || hdUrlCandidate || null,
+          previewUrl: previewUrlCandidate || hdUrlCandidate || null,
+          hdUrl: hdUrlCandidate || previewUrlCandidate || null,
+          resultUrl: hdUrlCandidate || previewUrlCandidate || null,
+          status: candidate?.status || null,
+          failureReason: candidate?.failureReason || null
+        };
+      })
+    : (previewUrl || hdUrl)
+      ? [{
+          candidateId: 'primary_candidate',
+          source: null,
+          engine: null,
+          imageUrl: previewUrl || hdUrl,
+          previewUrl: previewUrl || hdUrl,
+          hdUrl: hdUrl || previewUrl,
+          resultUrl: hdUrl || previewUrl,
+          status: task.status === 'SUCCESS' ? 'SUCCESS' : task.status,
+          failureReason: null
+        }]
+      : [];
 
   return {
     taskId: task.task_id,
@@ -143,6 +173,7 @@ function buildPhotoTaskView(task, specs) {
     },
     qualityStatus: task.quality_status,
     qualityMessage: task.quality_message,
+    candidates,
     warnings,
     previewMeta: buildImageMeta(previewUrl, sizeDefinition, 'preview'),
     hdMeta: buildImageMeta(hdUrl, sizeDefinition, 'print'),
@@ -357,6 +388,23 @@ module.exports = {
       ]);
       const previewUrl = idEditorToolClient.createAbsoluteOutputUrl(generateResult.previewUrl);
       const hdUrl = idEditorToolClient.createAbsoluteOutputUrl(generateResult.hdUrl);
+      const candidates = Array.isArray(generateResult.candidates)
+        ? generateResult.candidates.map((candidate, index) => {
+            const previewUrlCandidate = idEditorToolClient.createAbsoluteOutputUrl(candidate.previewUrl || candidate.imageUrl);
+            const hdUrlCandidate = idEditorToolClient.createAbsoluteOutputUrl(candidate.hdUrl || candidate.resultUrl);
+            return {
+              candidateId: candidate.candidateId || `candidate_${index + 1}`,
+              source: candidate.source || null,
+              engine: candidate.engine || candidate.source || null,
+              imageUrl: previewUrlCandidate || hdUrlCandidate || null,
+              previewUrl: previewUrlCandidate || hdUrlCandidate || null,
+              hdUrl: hdUrlCandidate || previewUrlCandidate || null,
+              resultUrl: hdUrlCandidate || previewUrlCandidate || null,
+              status: candidate.status || null,
+              failureReason: candidate.failureReason || null
+            };
+          })
+        : [];
 
       const updatedRecord = await photoRepository.markSuccess(taskRecord.id, {
         task_id: generateResult.taskId || taskRecord.task_id,
@@ -375,6 +423,7 @@ module.exports = {
             previewUrl,
             hdUrl,
             printLayoutUrl: idEditorToolClient.createAbsoluteOutputUrl(generateResult.printUrl),
+            candidates,
             sizeDefinition: selectedSizeDefinition,
             originalRequestedSizeKey: requestPayload.originalRequestedSizeKey,
             normalizedSizeCode: requestPayload.normalizedSizeCode,
@@ -383,6 +432,19 @@ module.exports = {
         },
         error_code: null,
         error_message: null
+      });
+
+      logger.info('photo process candidates assembled', {
+        taskId: updatedRecord.task_id,
+        candidates: candidates.map((candidate) => ({
+          candidateId: candidate.candidateId,
+          source: candidate.source || null,
+          engine: candidate.engine || null,
+          previewUrl: candidate.previewUrl || null,
+          hdUrl: candidate.hdUrl || null,
+          status: candidate.status || null,
+          failureReason: candidate.failureReason || null
+        }))
       });
 
       return buildPhotoTaskView(updatedRecord, mergedSpecs);
