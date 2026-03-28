@@ -1,6 +1,7 @@
 const path = require('path');
 
-const uploadDir = path.resolve(process.env.UPLOAD_DIR || process.env.UPLOAD_BASE_DIR || '/app/uploads');
+const SHARED_UPLOAD_ROOT = '/app/uploads';
+const uploadDir = path.resolve(SHARED_UPLOAD_ROOT);
 const authMockMode = process.env.AUTH_MOCK_MODE
   ? process.env.AUTH_MOCK_MODE === 'true'
   : (process.env.NODE_ENV || 'development') !== 'production';
@@ -19,7 +20,7 @@ module.exports = {
   wechatSecret: process.env.WECHAT_SECRET || '',
   authMockMode,
   uploadDir,
-  toolSharedUploadRoot: path.resolve(process.env.TOOL_SHARED_UPLOAD_ROOT || uploadDir),
+  toolSharedUploadRoot: path.resolve(SHARED_UPLOAD_ROOT),
   maxFileSize: Number(process.env.MAX_FILE_SIZE || 10 * 1024 * 1024),
   mockUserOpenid: process.env.MOCK_USER_OPENID || 'mock_openid_1001',
   mockUserNickname: process.env.MOCK_USER_NICKNAME || '演示用户',

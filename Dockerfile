@@ -10,7 +10,7 @@ RUN npm install --omit=dev && npm cache clean --force
 
 COPY server/. ./
 
-RUN mkdir -p /app/uploads /app/uploads/original /app/uploads/preview /app/uploads/hd /app/uploads/print /app/uploads/temp /app/config \
+RUN mkdir -p /app/uploads /app/uploads/original /app/uploads/processed /app/uploads/temp /app/config \
   && chown -R node:node /app
 
 VOLUME ["/app/uploads"]

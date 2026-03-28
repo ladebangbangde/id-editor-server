@@ -62,5 +62,5 @@ curl -i http://127.0.0.1:30000/api/scenes
 ## Docker 共享上传目录约定
 - 容器内上传根目录建议固定为 `UPLOAD_DIR=/app/uploads`。
 - `id-editor-server` 与 `id-editor-tool` 需要通过 `-v <host_upload_dir>:/app/uploads` 挂载同一个共享卷。
-- server 保存原图到 `/app/uploads/original/...`，对前端继续暴露 `/uploads/original/...` 静态 URL。
+- server 保存原图到 `/app/uploads/original/...`，处理结果保存到 `/app/uploads/processed/...`，对前端继续暴露 `/uploads/*` 静态 URL。
 - server 调 tool 时传递的是共享绝对路径，通过 `TOOL_SHARED_UPLOAD_ROOT=/app/uploads` 生成，例如 `/app/uploads/original/xxx.png`，不要再传相对路径 `uploads/original/xxx.png`。

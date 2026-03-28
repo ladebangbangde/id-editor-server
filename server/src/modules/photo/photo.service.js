@@ -1,3 +1,4 @@
+const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const AppError = require('../../utils/app-error');
@@ -341,6 +342,14 @@ module.exports = {
       || null;
     const sourceUrl = buildAbsoluteUrl(`/uploads/original/${path.basename(file.path)}`);
     const toolFilePath = buildToolFilePath(file.path);
+    const savedFileExists = file?.path ? fs.existsSync(file.path) : false;
+    const toolImagePathExists = toolFilePath ? fs.existsSync(toolFilePath) : false;
+    logger.info('photo source file saved', {
+      uploadedFilePath: file?.path || null,
+      uploadedFileExists: savedFileExists,
+      toolImagePath: toolFilePath,
+      toolImagePathExists
+    });
     const localTaskId = `photo_${uuidv4().replace(/-/g, '')}`;
 
     const taskRecord = await photoRepository.create({
@@ -374,6 +383,11 @@ module.exports = {
       const detectRequestPayload = {
         imagePath: toolFilePath
       };
+      logger.info('photo detect request imagePath', {
+        taskId: localTaskId,
+        imagePath: detectRequestPayload.imagePath,
+        imagePathExists: detectRequestPayload.imagePath ? fs.existsSync(detectRequestPayload.imagePath) : false
+      });
       const detectResponse = await idEditorToolClient.detectPhoto(detectRequestPayload);
       const detectResult = mapToolDetectResult(detectResponse);
       assertDetectResult(detectResult, taskRecord.task_id);
