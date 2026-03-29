@@ -51,8 +51,29 @@ module.exports = {
     return success(res, result, 'success');
   }),
 
+
+  createTask: asyncHandler(async (req, res) => {
+    const result = await photoService.createPhotoTask({
+      user: req.user,
+      file: req.file,
+      payload: req.body
+    });
+    return success(res, result, 'success');
+  }),
+
   history: asyncHandler(async (req, res) => {
     const result = await photoService.getPhotoHistory(req.user, req.query);
+    return success(res, result, 'success');
+  }),
+
+
+  taskStatus: asyncHandler(async (req, res) => {
+    const result = await photoService.getTaskStatus(req.params.taskId, req.user.id);
+    return success(res, result, 'success');
+  }),
+
+  taskResult: asyncHandler(async (req, res) => {
+    const result = await photoService.getTaskResult(req.params.taskId, req.user.id);
     return success(res, result, 'success');
   }),
 

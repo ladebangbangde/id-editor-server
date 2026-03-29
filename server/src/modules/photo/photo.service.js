@@ -17,6 +17,7 @@ const {
 const photoRepository = require('./photo.repository');
 const { getPhotoSpecs, mergeSpecs, validateProcessPhotoPayload, normalizeSizeCode } = require('./dto/process-photo.dto');
 const { toToolSharedAbsolutePath } = require('../../utils/file-helper');
+const photoTaskRuntimeService = require('./photo-task-runtime.service');
 
 function buildAbsoluteUrl(urlPath) {
   if (!urlPath) return null;
@@ -269,6 +270,65 @@ async function loadRuntimeSpecs() {
   return getPhotoSpecs();
 }
 
+
+
+const DB_STATUS_TO_RUNTIME_STATUS = {
+  PENDING: 'queued',
+  PROCESSING: 'processing',
+  SUCCESS: 'success',
+  FAILED: 'failed'
+};
+
+const STAGE_PROGRESS_MAP = {
+  received: 5,
+  checking: 20,
+  adjusting: 45,
+  generating: 75,
+  finalizing: 90,
+  success: 100,
+  failed: 100
+};
+
+const STAGE_TEXT_MAP = {
+  received: '已接收照片，等待开始处理',
+  checking: '正在检查照片',
+  adjusting: '正在整理人像与背景',
+  generating: '正在生成证件照结果',
+  finalizing: '正在保存最终文件',
+  success: '处理完成',
+  failed: '处理失败'
+};
+
+function buildTaskStatusFromDb(task, runtimeStatus) {
+  if (!task) return null;
+  const status = runtimeStatus?.status || DB_STATUS_TO_RUNTIME_STATUS[task.status] || 'processing';
+  let stageCode = runtimeStatus?.stageCode;
+  if (!stageCode) {
+    if (task.status === 'SUCCESS') stageCode = 'success';
+    else if (task.status === 'FAILED') stageCode = 'failed';
+    else if (task.quality_message === '图片检测中') stageCode = 'checking';
+    else if (task.quality_message === '证件照生成中') stageCode = 'generating';
+    else stageCode = 'received';
+  }
+
+  const startedAt = runtimeStatus?.startedAt || task.created_at;
+  const updatedAt = runtimeStatus?.updatedAt || task.updated_at || task.created_at;
+  return {
+    taskId: task.task_id,
+    status,
+    stageCode,
+    stageText: runtimeStatus?.stageText || STAGE_TEXT_MAP[stageCode] || STAGE_TEXT_MAP.received,
+    progress: runtimeStatus?.progress ?? STAGE_PROGRESS_MAP[stageCode] ?? STAGE_PROGRESS_MAP.received,
+    startedAt,
+    updatedAt,
+    elapsedMs: Math.max(0, Date.now() - new Date(startedAt).getTime()),
+    errorCode: runtimeStatus?.errorCode || task.error_code || null,
+    errorMessage: runtimeStatus?.errorMessage || task.error_message || null,
+    result: runtimeStatus?.result || (task.status === 'SUCCESS' ? buildPhotoTaskView(task, null) : null),
+    isCompleted: runtimeStatus?.isCompleted ?? ['SUCCESS', 'FAILED'].includes(task.status)
+  };
+}
+
 function isLegacyFormalWearTask(task) {
   if (!task) return false;
   if (task.size_code === photoRepository.LEGACY_FORMAL_WEAR_SIZE_CODE) return true;
@@ -296,7 +356,35 @@ module.exports = {
 
   async processPhoto({ user, file, payload }) {
     await this.assertUserCanProcess(user);
+    const prepared = await this.prepareTaskContext({ user, file, payload });
+    const result = await this.executeTaskFlow(prepared, { asyncMode: false });
+    return buildPhotoTaskView(result.updatedRecord, prepared.mergedSpecs);
+  },
 
+  async createPhotoTask({ user, file, payload }) {
+    await this.assertUserCanProcess(user);
+    const prepared = await this.prepareTaskContext({ user, file, payload });
+    const runtimeStatus = photoTaskRuntimeService.createTask({
+      taskId: prepared.localTaskId,
+      userId: user.id
+    });
+
+    setImmediate(async () => {
+      try {
+        await this.executeTaskFlow(prepared, { asyncMode: true });
+      } catch (error) {
+        logger.warn('photo async task execution failed', {
+          taskId: prepared.localTaskId,
+          message: error.message,
+          businessCode: error.businessCode || null
+        });
+      }
+    });
+
+    return runtimeStatus;
+  },
+
+  async prepareTaskContext({ user, file, payload }) {
     const specs = await loadRuntimeSpecs();
     const validation = validateProcessPhotoPayload(payload, file, specs);
     if (!validation.valid) {
@@ -342,16 +430,15 @@ module.exports = {
       || null;
     const sourceUrl = buildAbsoluteUrl(`/uploads/original/${path.basename(file.path)}`);
     const toolFilePath = buildToolFilePath(file.path);
-    const savedFileExists = file?.path ? fs.existsSync(file.path) : false;
-    const toolImagePathExists = toolFilePath ? fs.existsSync(toolFilePath) : false;
+
     logger.info('photo source file saved', {
       uploadedFilePath: file?.path || null,
-      uploadedFileExists: savedFileExists,
+      uploadedFileExists: file?.path ? fs.existsSync(file.path) : false,
       toolImagePath: toolFilePath,
-      toolImagePathExists
+      toolImagePathExists: toolFilePath ? fs.existsSync(toolFilePath) : false
     });
-    const localTaskId = `photo_${uuidv4().replace(/-/g, '')}`;
 
+    const localTaskId = `photo_${uuidv4().replace(/-/g, '')}`;
     const taskRecord = await photoRepository.create({
       user_id: user.id,
       task_id: localTaskId,
@@ -373,25 +460,41 @@ module.exports = {
       }
     });
 
+    return {
+      user,
+      localTaskId,
+      taskRecord,
+      requestPayload,
+      selectedSizeDefinition,
+      sourceUrl,
+      toolFilePath,
+      mergedSpecs
+    };
+  },
+
+  async executeTaskFlow(context, { asyncMode = false } = {}) {
+    const { user, localTaskId, taskRecord, requestPayload, selectedSizeDefinition, toolFilePath, mergedSpecs } = context;
+
     try {
+      photoTaskRuntimeService.updateTaskStage(localTaskId, 'checking');
       await photoRepository.markProcessing(taskRecord.id, {
         status: 'PROCESSING',
         quality_status: 'WARNING',
         quality_message: '图片检测中'
       });
 
-      const detectRequestPayload = {
-        imagePath: toolFilePath
-      };
+      const detectRequestPayload = { imagePath: toolFilePath };
       logger.info('photo detect request imagePath', {
         taskId: localTaskId,
         imagePath: detectRequestPayload.imagePath,
         imagePathExists: detectRequestPayload.imagePath ? fs.existsSync(detectRequestPayload.imagePath) : false
       });
+
       const detectResponse = await idEditorToolClient.detectPhoto(detectRequestPayload);
       const detectResult = mapToolDetectResult(detectResponse);
       assertDetectResult(detectResult, taskRecord.task_id);
 
+      photoTaskRuntimeService.updateTaskStage(localTaskId, 'adjusting');
       const toolRequestPayload = buildGeneratePhotoPayload({
         storedImagePath: toolFilePath,
         sizeCode: requestPayload.sizeCode,
@@ -417,11 +520,13 @@ module.exports = {
         }
       });
 
+      photoTaskRuntimeService.updateTaskStage(localTaskId, 'generating');
       const toolResponse = await idEditorToolClient.generatePhoto(toolRequestPayload);
       const generateResult = mapToolGenerateResult(toolResponse);
       if (!generateResult.previewUrl || !generateResult.hdUrl) {
         throw new AppError('图像处理失败', 502, null, 2003);
       }
+
       const quality = buildQualitySummary(detectResult, generateResult);
       const warnings = normalizeTaskWarnings([
         ...(detectResult.reasons || []),
@@ -448,8 +553,9 @@ module.exports = {
           })
         : [];
 
+      photoTaskRuntimeService.updateTaskStage(localTaskId, 'finalizing');
       const updatedRecord = await photoRepository.markSuccess(taskRecord.id, {
-        task_id: generateResult.taskId || taskRecord.task_id,
+        task_id: taskRecord.task_id,
         status: 'SUCCESS',
         preview_url: previewUrl,
         result_url: hdUrl,
@@ -489,7 +595,22 @@ module.exports = {
         }))
       });
 
-      return buildPhotoTaskView(updatedRecord, mergedSpecs);
+      const view = buildPhotoTaskView(updatedRecord, mergedSpecs);
+      photoTaskRuntimeService.markTaskSuccess(localTaskId, {
+        taskId: view.taskId,
+        status: view.status,
+        previewUrl: view.previewUrl,
+        hdUrl: view.hdUrl,
+        resultUrl: view.resultUrl,
+        sizeCode: view.sizeCode,
+        qualityStatus: view.qualityStatus,
+        qualityMessage: view.qualityMessage,
+        warnings: view.warnings,
+        candidates: view.candidates,
+        completedAt: new Date().toISOString()
+      });
+
+      return { updatedRecord, view };
     } catch (error) {
       const mappedError = error instanceof AppError
         ? {
@@ -509,6 +630,11 @@ module.exports = {
         response_payload: error instanceof AppError ? null : serializeToolError(error)
       });
 
+      photoTaskRuntimeService.markTaskFailed(localTaskId, {
+        errorCode: error.toolCode || String(mappedError.businessCode),
+        errorMessage: error.toolMessage || error.message || mappedError.message
+      });
+
       logger.warn('photo processing failed', {
         userId: user.id,
         localTaskId,
@@ -518,6 +644,10 @@ module.exports = {
         businessCode: mappedError.businessCode,
         message: mappedError.message
       });
+
+      if (asyncMode) {
+        return { failedRecord, mappedError };
+      }
 
       if (error instanceof AppError) {
         throw new AppError(
@@ -541,6 +671,34 @@ module.exports = {
       throw new AppError(mappedError.message, mappedError.httpStatus, structuredFailure, mappedError.businessCode);
     }
   },
+
+  async getTaskStatus(taskId, userId) {
+    const task = await photoRepository.findByTaskId(taskId, userId);
+    if (!task) {
+      throw new AppError('任务不存在', 404, null, 404);
+    }
+    const runtimeStatus = photoTaskRuntimeService.getTaskStatus(taskId);
+    return buildTaskStatusFromDb(task, runtimeStatus);
+  },
+
+  async getTaskResult(taskId, userId) {
+    const task = await photoRepository.findByTaskId(taskId, userId);
+    if (!task) {
+      throw new AppError('任务不存在', 404, null, 404);
+    }
+
+    if (task.status !== 'SUCCESS') {
+      const runtimeStatus = photoTaskRuntimeService.getTaskStatus(taskId);
+      throw new AppError('任务尚未完成', 409, {
+        taskId,
+        status: buildTaskStatusFromDb(task, runtimeStatus)
+      }, 409);
+    }
+
+    const specs = await loadRuntimeSpecs();
+    return buildPhotoTaskView(task, specs);
+  },
+
 
   async getPhotoHistory(user, query = {}) {
     const userId = user?.id;
