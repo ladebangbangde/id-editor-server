@@ -299,15 +299,36 @@ const STAGE_TEXT_MAP = {
   failed: '处理失败'
 };
 
+
+function buildStageSnapshot(stageCode) {
+  return {
+    stageCode,
+    stageText: STAGE_TEXT_MAP[stageCode] || STAGE_TEXT_MAP.received,
+    progress: STAGE_PROGRESS_MAP[stageCode] ?? STAGE_PROGRESS_MAP.received,
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function buildTaskRequestPayload(basePayload, stageCode, patch = {}) {
+  return {
+    ...basePayload,
+    ...patch,
+    taskProgress: buildStageSnapshot(stageCode)
+  };
+}
+
 function buildTaskStatusFromDb(task, runtimeStatus) {
   if (!task) return null;
   const status = runtimeStatus?.status || DB_STATUS_TO_RUNTIME_STATUS[task.status] || 'processing';
-  let stageCode = runtimeStatus?.stageCode;
+  const persistedStageCode = task.request_payload?.taskProgress?.stageCode;
+  let stageCode = runtimeStatus?.stageCode || persistedStageCode;
   if (!stageCode) {
     if (task.status === 'SUCCESS') stageCode = 'success';
     else if (task.status === 'FAILED') stageCode = 'failed';
     else if (task.quality_message === '图片检测中') stageCode = 'checking';
+    else if (task.quality_message === '正在整理人像与背景') stageCode = 'adjusting';
     else if (task.quality_message === '证件照生成中') stageCode = 'generating';
+    else if (task.quality_message === '正在保存最终文件') stageCode = 'finalizing';
     else stageCode = 'received';
   }
 
@@ -317,8 +338,8 @@ function buildTaskStatusFromDb(task, runtimeStatus) {
     taskId: task.task_id,
     status,
     stageCode,
-    stageText: runtimeStatus?.stageText || STAGE_TEXT_MAP[stageCode] || STAGE_TEXT_MAP.received,
-    progress: runtimeStatus?.progress ?? STAGE_PROGRESS_MAP[stageCode] ?? STAGE_PROGRESS_MAP.received,
+    stageText: runtimeStatus?.stageText || task.request_payload?.taskProgress?.stageText || STAGE_TEXT_MAP[stageCode] || STAGE_TEXT_MAP.received,
+    progress: runtimeStatus?.progress ?? task.request_payload?.taskProgress?.progress ?? STAGE_PROGRESS_MAP[stageCode] ?? STAGE_PROGRESS_MAP.received,
     startedAt,
     updatedAt,
     elapsedMs: Math.max(0, Date.now() - new Date(startedAt).getTime()),
@@ -439,25 +460,27 @@ module.exports = {
     });
 
     const localTaskId = `photo_${uuidv4().replace(/-/g, '')}`;
+    const baseTaskRequestPayload = {
+      mode: 'idPhoto',
+      clientRequest: requestPayload,
+      originalRequestedSizeKey: requestPayload.originalRequestedSizeKey,
+      normalizedSizeCode: requestPayload.normalizedSizeCode,
+      toolSizeKey: requestPayload.toolSizeKey,
+      selectedSizeDefinition,
+      toolFilePath
+    };
+
     const taskRecord = await photoRepository.create({
       user_id: user.id,
       task_id: localTaskId,
-      status: 'PROCESSING',
+      status: 'PENDING',
       source_url: sourceUrl,
       size_code: requestPayload.sizeCode,
       background_color: requestPayload.backgroundColor,
       warnings: [],
       quality_status: 'WARNING',
-      quality_message: '任务处理中',
-      request_payload: {
-        mode: 'idPhoto',
-        clientRequest: requestPayload,
-        originalRequestedSizeKey: requestPayload.originalRequestedSizeKey,
-        normalizedSizeCode: requestPayload.normalizedSizeCode,
-        toolSizeKey: requestPayload.toolSizeKey,
-        selectedSizeDefinition,
-        toolFilePath
-      }
+      quality_message: STAGE_TEXT_MAP.received,
+      request_payload: buildTaskRequestPayload(baseTaskRequestPayload, 'received')
     });
 
     return {
@@ -468,19 +491,21 @@ module.exports = {
       selectedSizeDefinition,
       sourceUrl,
       toolFilePath,
-      mergedSpecs
+      mergedSpecs,
+      baseTaskRequestPayload
     };
   },
 
   async executeTaskFlow(context, { asyncMode = false } = {}) {
-    const { user, localTaskId, taskRecord, requestPayload, selectedSizeDefinition, toolFilePath, mergedSpecs } = context;
+    const { user, localTaskId, taskRecord, requestPayload, selectedSizeDefinition, toolFilePath, mergedSpecs, baseTaskRequestPayload } = context;
 
     try {
       photoTaskRuntimeService.updateTaskStage(localTaskId, 'checking');
       await photoRepository.markProcessing(taskRecord.id, {
         status: 'PROCESSING',
         quality_status: 'WARNING',
-        quality_message: '图片检测中'
+        quality_message: STAGE_TEXT_MAP.checking,
+        request_payload: buildTaskRequestPayload(baseTaskRequestPayload, 'checking')
       });
 
       const detectRequestPayload = { imagePath: toolFilePath };
@@ -495,6 +520,13 @@ module.exports = {
       assertDetectResult(detectResult, taskRecord.task_id);
 
       photoTaskRuntimeService.updateTaskStage(localTaskId, 'adjusting');
+      await photoRepository.markProcessing(taskRecord.id, {
+        status: 'PROCESSING',
+        quality_status: 'WARNING',
+        quality_message: STAGE_TEXT_MAP.adjusting,
+        request_payload: buildTaskRequestPayload(baseTaskRequestPayload, 'adjusting', { detectRequest: detectRequestPayload })
+      });
+
       const toolRequestPayload = buildGeneratePhotoPayload({
         storedImagePath: toolFilePath,
         sizeCode: requestPayload.sizeCode,
@@ -506,18 +538,11 @@ module.exports = {
       await photoRepository.markProcessing(taskRecord.id, {
         status: 'PROCESSING',
         quality_status: 'WARNING',
-        quality_message: '证件照生成中',
-        request_payload: {
-          mode: 'idPhoto',
-          clientRequest: requestPayload,
-          originalRequestedSizeKey: requestPayload.originalRequestedSizeKey,
-          normalizedSizeCode: requestPayload.normalizedSizeCode,
-          toolSizeKey: requestPayload.toolSizeKey,
-          selectedSizeDefinition,
-          toolFilePath,
+        quality_message: STAGE_TEXT_MAP.generating,
+        request_payload: buildTaskRequestPayload(baseTaskRequestPayload, 'generating', {
           detectRequest: detectRequestPayload,
           toolRequest: toolRequestPayload
-        }
+        })
       });
 
       photoTaskRuntimeService.updateTaskStage(localTaskId, 'generating');
@@ -554,6 +579,16 @@ module.exports = {
         : [];
 
       photoTaskRuntimeService.updateTaskStage(localTaskId, 'finalizing');
+      await photoRepository.markProcessing(taskRecord.id, {
+        status: 'PROCESSING',
+        quality_status: 'WARNING',
+        quality_message: STAGE_TEXT_MAP.finalizing,
+        request_payload: buildTaskRequestPayload(baseTaskRequestPayload, 'finalizing', {
+          detectRequest: detectRequestPayload,
+          toolRequest: toolRequestPayload
+        })
+      });
+
       const updatedRecord = await photoRepository.markSuccess(taskRecord.id, {
         task_id: taskRecord.task_id,
         status: 'SUCCESS',
@@ -564,6 +599,10 @@ module.exports = {
         warnings,
         quality_status: quality.qualityStatus,
         quality_message: quality.qualityMessage,
+        request_payload: buildTaskRequestPayload(baseTaskRequestPayload, 'success', {
+          detectRequest: detectRequestPayload,
+          toolRequest: toolRequestPayload
+        }),
         response_payload: {
           detect: detectResponse,
           generate: toolResponse,
@@ -625,6 +664,7 @@ module.exports = {
         warnings: [],
         quality_status: 'WARNING',
         quality_message: mappedError.message,
+        request_payload: buildTaskRequestPayload(baseTaskRequestPayload, 'failed'),
         error_code: error.toolCode || String(mappedError.businessCode),
         error_message: error.toolMessage || error.message || mappedError.message,
         response_payload: error instanceof AppError ? null : serializeToolError(error)
