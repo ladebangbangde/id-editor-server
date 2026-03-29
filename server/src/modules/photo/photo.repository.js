@@ -9,25 +9,27 @@ module.exports = {
     return PhotoTask.create(payload);
   },
 
-  async markProcessing(id, payload) {
+  async updateById(id, payload) {
     const record = await PhotoTask.findByPk(id);
     if (!record) return null;
     await record.update(payload);
     return record;
   },
 
-  async markSuccess(id, payload) {
-    const record = await PhotoTask.findByPk(id);
-    if (!record) return null;
-    await record.update(payload);
-    return record;
+  markProcessing(id, payload) {
+    return this.updateById(id, payload);
   },
 
-  async markFailed(id, payload) {
-    const record = await PhotoTask.findByPk(id);
-    if (!record) return null;
-    await record.update(payload);
-    return record;
+  markSuccess(id, payload) {
+    return this.updateById(id, payload);
+  },
+
+  markFailed(id, payload) {
+    return this.updateById(id, payload);
+  },
+
+  findRawByTaskId(taskId) {
+    return PhotoTask.findOne({ where: { task_id: taskId } });
   },
 
   findByTaskId(taskId, userId) {
