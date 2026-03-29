@@ -109,6 +109,60 @@ function buildSizeDefinition(task, specs) {
   };
 }
 
+
+
+function normalizeCandidate(candidate, index, fallbackStatus) {
+  const previewUrlCandidate = candidate?.previewUrl || candidate?.imageUrl || null;
+  const hdUrlCandidate = candidate?.hdUrl || candidate?.resultUrl || null;
+  return {
+    candidateId: candidate?.candidateId || `candidate_${index + 1}`,
+    source: candidate?.source || null,
+    engine: candidate?.engine || candidate?.source || null,
+    imageUrl: previewUrlCandidate || hdUrlCandidate || null,
+    previewUrl: previewUrlCandidate || hdUrlCandidate || null,
+    hdUrl: hdUrlCandidate || previewUrlCandidate || null,
+    resultUrl: hdUrlCandidate || previewUrlCandidate || null,
+    status: candidate?.status || fallbackStatus || null,
+    failureReason: candidate?.failureReason || null
+  };
+}
+
+function extractTaskCandidates(task) {
+  const candidatesFromSummary = Array.isArray(task.response_payload?.summary?.candidates)
+    ? task.response_payload.summary.candidates
+    : [];
+  const candidatesFromGenerateData = Array.isArray(task.response_payload?.generate?.data?.candidates)
+    ? task.response_payload.generate.data.candidates
+    : [];
+  const candidatesFromGenerateResult = Array.isArray(task.response_payload?.generate?.result?.candidates)
+    ? task.response_payload.generate.result.candidates
+    : [];
+
+  const rawCandidates = candidatesFromSummary.length > 0
+    ? candidatesFromSummary
+    : (candidatesFromGenerateData.length > 0 ? candidatesFromGenerateData : candidatesFromGenerateResult);
+
+  if (rawCandidates.length > 0) {
+    return rawCandidates.map((candidate, index) => normalizeCandidate(candidate, index, null));
+  }
+
+  const previewUrl = task.preview_url;
+  const hdUrl = task.result_url;
+  if (!(previewUrl || hdUrl)) return [];
+
+  return [normalizeCandidate({
+    candidateId: 'primary_candidate',
+    source: null,
+    engine: null,
+    imageUrl: previewUrl || hdUrl,
+    previewUrl: previewUrl || hdUrl,
+    hdUrl: hdUrl || previewUrl,
+    resultUrl: hdUrl || previewUrl,
+    status: task.status === 'SUCCESS' ? 'SUCCESS' : task.status,
+    failureReason: null
+  }, 0, task.status)];
+}
+
 function buildPhotoTaskView(task, specs) {
   const warnings = Array.isArray(task.warnings) ? task.warnings : [];
   const sourceUrl = task.source_url;
@@ -119,36 +173,7 @@ function buildPhotoTaskView(task, specs) {
   const sizeDefinition = buildSizeDefinition(task, specs);
   const originalRequestedSizeKey = requestPayload.sizeCode || task.request_payload?.originalRequestedSizeKey || task.size_code;
   const normalizedSizeCode = normalizeSizeCode(task.size_code) || task.request_payload?.normalizedSizeCode || task.size_code;
-  const rawCandidates = Array.isArray(task.response_payload?.summary?.candidates) ? task.response_payload.summary.candidates : [];
-  const candidates = rawCandidates.length > 0
-    ? rawCandidates.map((candidate, index) => {
-        const previewUrlCandidate = candidate?.previewUrl || candidate?.imageUrl || null;
-        const hdUrlCandidate = candidate?.hdUrl || candidate?.resultUrl || null;
-        return {
-          candidateId: candidate?.candidateId || `candidate_${index + 1}`,
-          source: candidate?.source || null,
-          engine: candidate?.engine || candidate?.source || null,
-          imageUrl: previewUrlCandidate || hdUrlCandidate || null,
-          previewUrl: previewUrlCandidate || hdUrlCandidate || null,
-          hdUrl: hdUrlCandidate || previewUrlCandidate || null,
-          resultUrl: hdUrlCandidate || previewUrlCandidate || null,
-          status: candidate?.status || null,
-          failureReason: candidate?.failureReason || null
-        };
-      })
-    : (previewUrl || hdUrl)
-      ? [{
-          candidateId: 'primary_candidate',
-          source: null,
-          engine: null,
-          imageUrl: previewUrl || hdUrl,
-          previewUrl: previewUrl || hdUrl,
-          hdUrl: hdUrl || previewUrl,
-          resultUrl: hdUrl || previewUrl,
-          status: task.status === 'SUCCESS' ? 'SUCCESS' : task.status,
-          failureReason: null
-        }]
-      : [];
+  const candidates = extractTaskCandidates(task);
 
   return {
     taskId: task.task_id,
