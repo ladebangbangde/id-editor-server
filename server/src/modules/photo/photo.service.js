@@ -317,6 +317,20 @@ function buildTaskRequestPayload(basePayload, stageCode, patch = {}) {
   };
 }
 
+
+function appendStageHistory(stageHistory = [], stageCode) {
+  const previousStageCode = stageHistory.length > 0 ? stageHistory[stageHistory.length - 1].stageCode : null;
+  if (previousStageCode === stageCode) return stageHistory;
+  return [...stageHistory, buildStageSnapshot(stageCode)];
+}
+
+function buildStageHistoryInfo(stageHistory = []) {
+  return {
+    stageCodes: stageHistory.map((item) => item.stageCode),
+    stageHistory
+  };
+}
+
 function buildTaskStatusFromDb(task, runtimeStatus) {
   if (!task) return null;
   const status = runtimeStatus?.status || DB_STATUS_TO_RUNTIME_STATUS[task.status] || 'processing';
@@ -332,6 +346,8 @@ function buildTaskStatusFromDb(task, runtimeStatus) {
     else stageCode = 'received';
   }
 
+  const persistedStageHistory = Array.isArray(task.request_payload?.stageHistory) ? task.request_payload.stageHistory : [];
+  const persistedStageCodes = Array.isArray(task.request_payload?.stageCodes) ? task.request_payload.stageCodes : persistedStageHistory.map((item) => item.stageCode);
   const startedAt = runtimeStatus?.startedAt || task.created_at;
   const updatedAt = runtimeStatus?.updatedAt || task.updated_at || task.created_at;
   return {
@@ -346,7 +362,9 @@ function buildTaskStatusFromDb(task, runtimeStatus) {
     errorCode: runtimeStatus?.errorCode || task.error_code || null,
     errorMessage: runtimeStatus?.errorMessage || task.error_message || null,
     result: runtimeStatus?.result || (task.status === 'SUCCESS' ? buildPhotoTaskView(task, null) : null),
-    isCompleted: runtimeStatus?.isCompleted ?? ['SUCCESS', 'FAILED'].includes(task.status)
+    isCompleted: runtimeStatus?.isCompleted ?? ['SUCCESS', 'FAILED'].includes(task.status),
+    stageCodes: runtimeStatus?.stageCodes || persistedStageCodes,
+    stageHistory: runtimeStatus?.stageHistory || persistedStageHistory
   };
 }
 
@@ -469,6 +487,7 @@ module.exports = {
       selectedSizeDefinition,
       toolFilePath
     };
+    const initialStageHistory = [buildStageSnapshot('received')];
 
     const taskRecord = await photoRepository.create({
       user_id: user.id,
@@ -480,7 +499,7 @@ module.exports = {
       warnings: [],
       quality_status: 'WARNING',
       quality_message: STAGE_TEXT_MAP.received,
-      request_payload: buildTaskRequestPayload(baseTaskRequestPayload, 'received')
+      request_payload: buildTaskRequestPayload(baseTaskRequestPayload, 'received', buildStageHistoryInfo(initialStageHistory))
     });
 
     return {
@@ -492,12 +511,14 @@ module.exports = {
       sourceUrl,
       toolFilePath,
       mergedSpecs,
-      baseTaskRequestPayload
+      baseTaskRequestPayload,
+      stageHistory: initialStageHistory
     };
   },
 
   async executeTaskFlow(context, { asyncMode = false } = {}) {
     const { user, localTaskId, taskRecord, requestPayload, selectedSizeDefinition, toolFilePath, mergedSpecs, baseTaskRequestPayload } = context;
+    let stageHistory = Array.isArray(context.stageHistory) ? [...context.stageHistory] : [buildStageSnapshot('received')];
 
     try {
       photoTaskRuntimeService.updateTaskStage(localTaskId, 'checking');
@@ -505,7 +526,7 @@ module.exports = {
         status: 'PROCESSING',
         quality_status: 'WARNING',
         quality_message: STAGE_TEXT_MAP.checking,
-        request_payload: buildTaskRequestPayload(baseTaskRequestPayload, 'checking')
+        request_payload: buildTaskRequestPayload(baseTaskRequestPayload, 'checking', buildStageHistoryInfo((stageHistory = appendStageHistory(stageHistory, 'checking'))))
       });
 
       const detectRequestPayload = { imagePath: toolFilePath };
@@ -524,7 +545,10 @@ module.exports = {
         status: 'PROCESSING',
         quality_status: 'WARNING',
         quality_message: STAGE_TEXT_MAP.adjusting,
-        request_payload: buildTaskRequestPayload(baseTaskRequestPayload, 'adjusting', { detectRequest: detectRequestPayload })
+        request_payload: buildTaskRequestPayload(baseTaskRequestPayload, 'adjusting', {
+          detectRequest: detectRequestPayload,
+          ...buildStageHistoryInfo((stageHistory = appendStageHistory(stageHistory, 'adjusting')))
+        })
       });
 
       const toolRequestPayload = buildGeneratePhotoPayload({
@@ -541,7 +565,8 @@ module.exports = {
         quality_message: STAGE_TEXT_MAP.generating,
         request_payload: buildTaskRequestPayload(baseTaskRequestPayload, 'generating', {
           detectRequest: detectRequestPayload,
-          toolRequest: toolRequestPayload
+          toolRequest: toolRequestPayload,
+          ...buildStageHistoryInfo((stageHistory = appendStageHistory(stageHistory, 'generating')))
         })
       });
 
@@ -585,7 +610,8 @@ module.exports = {
         quality_message: STAGE_TEXT_MAP.finalizing,
         request_payload: buildTaskRequestPayload(baseTaskRequestPayload, 'finalizing', {
           detectRequest: detectRequestPayload,
-          toolRequest: toolRequestPayload
+          toolRequest: toolRequestPayload,
+          ...buildStageHistoryInfo((stageHistory = appendStageHistory(stageHistory, 'finalizing')))
         })
       });
 
@@ -601,7 +627,8 @@ module.exports = {
         quality_message: quality.qualityMessage,
         request_payload: buildTaskRequestPayload(baseTaskRequestPayload, 'success', {
           detectRequest: detectRequestPayload,
-          toolRequest: toolRequestPayload
+          toolRequest: toolRequestPayload,
+          ...buildStageHistoryInfo((stageHistory = appendStageHistory(stageHistory, 'success')))
         }),
         response_payload: {
           detect: detectResponse,
@@ -664,7 +691,7 @@ module.exports = {
         warnings: [],
         quality_status: 'WARNING',
         quality_message: mappedError.message,
-        request_payload: buildTaskRequestPayload(baseTaskRequestPayload, 'failed'),
+        request_payload: buildTaskRequestPayload(baseTaskRequestPayload, 'failed', buildStageHistoryInfo((stageHistory = appendStageHistory(stageHistory, 'failed')))),
         error_code: error.toolCode || String(mappedError.businessCode),
         error_message: error.toolMessage || error.message || mappedError.message,
         response_payload: error instanceof AppError ? null : serializeToolError(error)

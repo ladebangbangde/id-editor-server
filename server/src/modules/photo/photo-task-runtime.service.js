@@ -27,7 +27,13 @@ class PhotoTaskRuntimeService {
       errorCode: null,
       errorMessage: null,
       result: null,
-      isCompleted: false
+      isCompleted: false,
+      stageHistory: [{
+        stageCode: 'received',
+        stageText: STAGE_DEFINITIONS.received.stageText,
+        progress: STAGE_DEFINITIONS.received.progress,
+        updatedAt: now
+      }]
     };
     this.tasks.set(taskId, state);
     return this.getTaskStatus(taskId);
@@ -37,11 +43,21 @@ class PhotoTaskRuntimeService {
     const task = this.tasks.get(taskId);
     if (!task) return null;
     const def = STAGE_DEFINITIONS[stageCode] || STAGE_DEFINITIONS.received;
+    const previousStageCode = task.stageCode;
     task.stageCode = stageCode;
     task.stageText = patch.stageText || def.stageText;
     task.progress = typeof patch.progress === 'number' ? patch.progress : def.progress;
     task.status = patch.status || def.status;
     task.updatedAt = new Date();
+
+    if (previousStageCode !== stageCode) {
+      task.stageHistory.push({
+        stageCode,
+        stageText: task.stageText,
+        progress: task.progress,
+        updatedAt: task.updatedAt
+      });
+    }
     if (Object.prototype.hasOwnProperty.call(patch, 'result')) {
       task.result = patch.result;
     }
@@ -92,7 +108,9 @@ class PhotoTaskRuntimeService {
       errorCode: task.errorCode,
       errorMessage: task.errorMessage,
       result: task.result,
-      isCompleted: task.isCompleted
+      isCompleted: task.isCompleted,
+      stageCodes: task.stageHistory.map((item) => item.stageCode),
+      stageHistory: task.stageHistory
     };
   }
 }
