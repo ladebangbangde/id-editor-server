@@ -1,4 +1,5 @@
 const photoService = require('./photo.service');
+const photoTaskService = require('./photo-task.service');
 const { success } = require('../../utils/api-response');
 const logger = require('../../utils/logger');
 
@@ -49,6 +50,25 @@ module.exports = {
     });
 
     return success(res, result, 'success');
+  }),
+
+  createTask: asyncHandler(async (req, res) => {
+    const result = await photoTaskService.createTask({
+      user: req.user,
+      file: req.file,
+      payload: req.body
+    });
+    return success(res, result, 'ok');
+  }),
+
+  taskStatus: asyncHandler(async (req, res) => {
+    const result = await photoTaskService.getTaskStatus(req.params.taskId, req.user.id);
+    return success(res, result, 'ok');
+  }),
+
+  taskResult: asyncHandler(async (req, res) => {
+    const result = await photoTaskService.getTaskResult(req.params.taskId, req.user.id);
+    return success(res, result, 'ok');
   }),
 
   history: asyncHandler(async (req, res) => {
