@@ -32,6 +32,11 @@ module.exports = {
   fileRetentionOriginalHours: Number(process.env.FILE_RETENTION_ORIGINAL_HOURS || 24),
   fileRetentionResultHours: Number(process.env.FILE_RETENTION_RESULT_HOURS || 168),
   softDeletePhysicalDeleteDelayMinutes: Number(process.env.SOFT_DELETE_PHYSICAL_DELETE_DELAY_MINUTES || 10),
+  fileTtlHours: Number(process.env.FILE_TTL_HOURS || process.env.FILE_RETENTION_RESULT_HOURS || 24 * 30),
+  softDeleteGraceHours: Number(process.env.SOFT_DELETE_GRACE_HOURS || 24 * 7),
+  failedTaskTtlHours: Number(process.env.FAILED_TASK_TTL_HOURS || 24 * 2),
   cleanupCron: process.env.CLEANUP_CRON || '*/30 * * * *',
+  cleanupBatchSize: Number(process.env.CLEANUP_BATCH_SIZE || 100),
+  cleanupDryRun: String(process.env.CLEANUP_DRY_RUN || 'false').toLowerCase() === 'true',
   userPathHashLength: Number(process.env.USER_PATH_HASH_LENGTH || 20),
 };

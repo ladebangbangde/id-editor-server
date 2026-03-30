@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "db:init": "mysql -u$DB_USER -p$DB_PASSWORD -h$DB_HOST -P$DB_PORT $DB_NAME < sql/init.sql"
+    "db:init": "mysql -u$DB_USER -p$DB_PASSWORD -h$DB_HOST -P$DB_PORT $DB_NAME < sql/init.sql",
+    "test": "node --test test/**/*.test.js",
+    "cleanup:run": "node scripts/run-photo-cleanup.js",
+    "cleanup:dry-run": "node scripts/run-photo-cleanup.js --dry-run",
+    "cleanup:repair": "node scripts/repair-photo-tasks.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

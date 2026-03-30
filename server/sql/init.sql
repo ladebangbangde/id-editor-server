@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS photo_tasks (
   user_id BIGINT NOT NULL,
   task_id VARCHAR(64) NOT NULL UNIQUE,
   status ENUM('PENDING','PROCESSING','SUCCESS','FAILED') NOT NULL DEFAULT 'PENDING',
-  source_url VARCHAR(255) NOT NULL,
+  source_url VARCHAR(255) NULL,
   preview_url VARCHAR(255) NULL,
   result_url VARCHAR(255) NULL,
   print_url VARCHAR(255) NULL,
@@ -93,6 +93,10 @@ CREATE TABLE IF NOT EXISTS photo_tasks (
   retain_until DATETIME NULL,
   deleted_at DATETIME NULL,
   physical_deleted_at DATETIME NULL,
+  purged_at DATETIME NULL,
+  cleanup_status VARCHAR(32) NOT NULL DEFAULT 'pending',
+  cleanup_error VARCHAR(1000) NULL,
+  file_expire_at DATETIME NULL,
   size_code VARCHAR(64) NOT NULL,
   background_color VARCHAR(32) NOT NULL,
   warnings JSON NOT NULL,
@@ -108,7 +112,10 @@ CREATE TABLE IF NOT EXISTS photo_tasks (
   KEY idx_photo_tasks_task_id (task_id),
   KEY idx_photo_tasks_user_deleted_created (user_id, deleted_at, created_at),
   KEY idx_photo_tasks_deleted_physical (deleted_at, physical_deleted_at),
-  KEY idx_photo_tasks_retain_until (retain_until)
+  KEY idx_photo_tasks_retain_until (retain_until),
+  KEY idx_photo_tasks_cleanup_status (cleanup_status),
+  KEY idx_photo_tasks_file_expire_at (file_expire_at),
+  KEY idx_photo_tasks_purged_at (purged_at)
 );
 
 CREATE TABLE IF NOT EXISTS orders (

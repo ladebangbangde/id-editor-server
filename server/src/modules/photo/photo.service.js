@@ -21,6 +21,7 @@ const photoTaskRuntimeService = require('./photo-task-runtime.service');
 const { ensureDir } = require('../../utils/file-helper');
 const { getCurrentUserIdentity } = require('../../utils/userIdentity');
 const { buildUserImageStoragePath } = require('../../utils/userPath');
+const photoRetentionService = require('../../services/photoRetention.service');
 
 function buildAbsoluteUrl(urlPath) {
   if (!urlPath) return null;
@@ -913,14 +914,16 @@ module.exports = {
 
   async deleteHistory(taskId, req) {
     const identity = getCurrentUserIdentity(req);
-    const result = await photoRepository.softDeleteByTaskId(taskId, identity.userId, new Date());
+    const now = new Date();
+    const result = await photoRetentionService.markHistoryDeleted(taskId, identity.userId, now);
 
     logger.info('photo history soft delete result', {
       imageId: taskId,
       userId: identity.userId,
       openidHash: identity.openidHash,
       found: result.found,
-      deleted: result.deleted
+      deleted: result.deleted,
+      purgeScheduledAt: result.record?.file_expire_at || null
     });
 
     if (!result.found) {
@@ -933,7 +936,12 @@ module.exports = {
 
     return {
       success: true,
-      message: '历史记录已删除'
+      message: '历史记录已删除，相关文件将在系统保留期后自动清理',
+      data: {
+        deleted: true,
+        purgeScheduled: true,
+        purgeScheduledAt: result.record?.file_expire_at || null
+      }
     };
   },
 
