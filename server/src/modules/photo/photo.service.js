@@ -18,6 +18,9 @@ const photoRepository = require('./photo.repository');
 const { getPhotoSpecs, mergeSpecs, validateProcessPhotoPayload, normalizeSizeCode } = require('./dto/process-photo.dto');
 const { toToolSharedAbsolutePath } = require('../../utils/file-helper');
 const photoTaskRuntimeService = require('./photo-task-runtime.service');
+const { ensureDir } = require('../../utils/file-helper');
+const { getCurrentUserIdentity } = require('../../utils/userIdentity');
+const { buildUserImageStoragePath } = require('../../utils/userPath');
 
 function buildAbsoluteUrl(urlPath) {
   if (!urlPath) return null;
@@ -38,6 +41,14 @@ function buildSourceFilePath(sourceUrl) {
   } catch (_error) {
     return sourceUrl.startsWith('/') ? sourceUrl : `/${sourceUrl}`;
   }
+}
+
+
+function toUploadRelativeUrl(absolutePath) {
+  if (!absolutePath) return null;
+  const relativePath = path.relative(appConfig.uploadDir, absolutePath).replace(/\\/g, '/');
+  if (!relativePath || relativePath.startsWith('..')) return null;
+  return buildAbsoluteUrl(`/uploads/${relativePath}`);
 }
 
 function serializeToolError(error) {
@@ -492,17 +503,35 @@ module.exports = {
     const selectedSizeDefinition = validation.resolvedSize?.definition
       || mergedSpecs.sizeDefinitions.find((item) => item.sizeCode === requestPayload.sizeCode)
       || null;
-    const sourceUrl = buildAbsoluteUrl(`/uploads/original/${path.basename(file.path)}`);
-    const toolFilePath = buildToolFilePath(file.path);
+    const localTaskId = `photo_${uuidv4().replace(/-/g, '')}`;
+    const userIdentity = getCurrentUserIdentity({ user });
+    const storagePaths = buildUserImageStoragePath({
+      openid: userIdentity.openid,
+      unionid: userIdentity.unionid,
+      createdAt: new Date(),
+      imageId: localTaskId
+    });
+    ensureDir(storagePaths.baseDir);
+
+    const sourceExtension = path.extname(file.path || file.originalname || '').toLowerCase() || '.jpg';
+    const sourceAbsolutePath = sourceExtension === '.jpg'
+      ? storagePaths.originalPath
+      : storagePaths.originalPath.replace(/\.jpg$/, sourceExtension);
+    fs.renameSync(file.path, sourceAbsolutePath);
+
+    const sourceUrl = toUploadRelativeUrl(sourceAbsolutePath);
+    const toolFilePath = buildToolFilePath(sourceAbsolutePath);
 
     logger.info('photo source file saved', {
-      uploadedFilePath: file?.path || null,
-      uploadedFileExists: file?.path ? fs.existsSync(file.path) : false,
+      uploadedFilePath: sourceAbsolutePath || null,
+      uploadedFileExists: sourceAbsolutePath ? fs.existsSync(sourceAbsolutePath) : false,
       toolImagePath: toolFilePath,
-      toolImagePathExists: toolFilePath ? fs.existsSync(toolFilePath) : false
+      toolImagePathExists: toolFilePath ? fs.existsSync(toolFilePath) : false,
+      imageId: localTaskId,
+      openidHash: userIdentity.openidHash,
+      storageBaseDir: storagePaths.baseDir
     });
 
-    const localTaskId = `photo_${uuidv4().replace(/-/g, '')}`;
     const baseTaskRequestPayload = {
       mode: 'idPhoto',
       clientRequest: requestPayload,
@@ -524,7 +553,13 @@ module.exports = {
       warnings: [],
       quality_status: 'WARNING',
       quality_message: STAGE_TEXT_MAP.received,
-      request_payload: buildTaskRequestPayload(baseTaskRequestPayload, 'received', buildStageHistoryInfo(initialStageHistory))
+      request_payload: buildTaskRequestPayload(baseTaskRequestPayload, 'received', buildStageHistoryInfo(initialStageHistory)),
+      openid_hash: userIdentity.openidHash,
+      retain_until: new Date(Date.now() + appConfig.fileRetentionResultHours * 60 * 60 * 1000),
+      original_path: sourceAbsolutePath,
+      preview_path: storagePaths.previewPath,
+      hd_path: storagePaths.hdPath,
+      print_path: storagePaths.printPath
     });
 
     return {
@@ -537,12 +572,14 @@ module.exports = {
       toolFilePath,
       mergedSpecs,
       baseTaskRequestPayload,
-      stageHistory: initialStageHistory
+      stageHistory: initialStageHistory,
+      userIdentity,
+      storagePaths
     };
   },
 
   async executeTaskFlow(context, { asyncMode = false } = {}) {
-    const { user, localTaskId, taskRecord, requestPayload, selectedSizeDefinition, toolFilePath, mergedSpecs, baseTaskRequestPayload } = context;
+    const { user, localTaskId, taskRecord, requestPayload, selectedSizeDefinition, toolFilePath, mergedSpecs, baseTaskRequestPayload, userIdentity, storagePaths } = context;
     let stageHistory = Array.isArray(context.stageHistory) ? [...context.stageHistory] : [buildStageSnapshot('received')];
 
     try {
@@ -655,6 +692,8 @@ module.exports = {
           toolRequest: toolRequestPayload,
           ...buildStageHistoryInfo((stageHistory = appendStageHistory(stageHistory, 'success')))
         }),
+        retain_until: taskRecord.retain_until || new Date(Date.now() + appConfig.fileRetentionResultHours * 60 * 60 * 1000),
+        print_url: idEditorToolClient.createAbsoluteOutputUrl(generateResult.printUrl),
         response_payload: {
           detect: detectResponse,
           generate: toolResponse,
@@ -684,6 +723,13 @@ module.exports = {
           status: candidate.status || null,
           failureReason: candidate.failureReason || null
         }))
+      });
+
+      logger.info('photo process success metadata', {
+        imageId: updatedRecord.task_id,
+        openidHash: userIdentity?.openidHash || null,
+        storageBaseDir: storagePaths?.baseDir || null,
+        retainUntil: updatedRecord.retain_until || null
       });
 
       const view = buildPhotoTaskView(updatedRecord, mergedSpecs);
@@ -767,6 +813,10 @@ module.exports = {
   async getTaskStatus(taskId, userId) {
     const task = await photoRepository.findByTaskId(taskId, userId);
     if (!task) {
+      const anyUserTask = await photoRepository.findByTaskIdAnyUser(taskId);
+      if (anyUserTask) {
+        throw new AppError('无权限访问该记录', 403, null, 403);
+      }
       throw new AppError('任务不存在', 404, null, 404);
     }
     const runtimeStatus = photoTaskRuntimeService.getTaskStatus(taskId);
@@ -777,6 +827,10 @@ module.exports = {
     const task = await photoRepository.findByTaskId(taskId, userId);
     if (!task) {
       throw new AppError('任务不存在', 404, null, 404);
+    }
+
+    if (task.deleted_at) {
+      throw new AppError('记录已删除', 410, null, 410);
     }
 
     if (task.status !== 'SUCCESS') {
@@ -856,10 +910,49 @@ module.exports = {
     };
   },
 
+
+  async deleteHistory(taskId, req) {
+    const identity = getCurrentUserIdentity(req);
+    const result = await photoRepository.softDeleteByTaskId(taskId, identity.userId, new Date());
+
+    logger.info('photo history soft delete result', {
+      imageId: taskId,
+      userId: identity.userId,
+      openidHash: identity.openidHash,
+      found: result.found,
+      deleted: result.deleted
+    });
+
+    if (!result.found) {
+      const anyUserRecord = await photoRepository.findByTaskIdAnyUser(taskId);
+      if (anyUserRecord) {
+        throw new AppError('无权限操作该记录', 403, null, 403);
+      }
+      throw new AppError('记录不存在', 404, null, 404);
+    }
+
+    return {
+      success: true,
+      message: '历史记录已删除'
+    };
+  },
+
   async getTaskDetail(taskId, userId) {
     const task = await photoRepository.findByTaskId(taskId, userId);
     if (!task) {
+      const anyUserTask = await photoRepository.findByTaskIdAnyUser(taskId);
+      if (anyUserTask) {
+        throw new AppError('无权限访问该记录', 403, null, 403);
+      }
       throw new AppError('任务不存在', 404, null, 404);
+    }
+
+    if (task.deleted_at) {
+      throw new AppError('记录已删除', 410, null, 410);
+    }
+
+    if (!task.preview_url && !task.result_url && task.physical_deleted_at) {
+      throw new AppError('文件已过期或已删除', 410, null, 410);
     }
 
     const specs = await loadRuntimeSpecs();
@@ -870,6 +963,10 @@ module.exports = {
     const task = await photoRepository.findByTaskId(taskId, userId);
     if (!task) {
       throw new AppError('任务不存在', 404, null, 404);
+    }
+
+    if (task.deleted_at) {
+      throw new AppError('记录已删除', 410, null, 410);
     }
 
     const specs = await loadRuntimeSpecs();

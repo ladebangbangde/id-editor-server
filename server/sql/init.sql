@@ -84,6 +84,15 @@ CREATE TABLE IF NOT EXISTS photo_tasks (
   source_url VARCHAR(255) NOT NULL,
   preview_url VARCHAR(255) NULL,
   result_url VARCHAR(255) NULL,
+  print_url VARCHAR(255) NULL,
+  original_path VARCHAR(512) NULL,
+  preview_path VARCHAR(512) NULL,
+  hd_path VARCHAR(512) NULL,
+  print_path VARCHAR(512) NULL,
+  openid_hash VARCHAR(64) NULL,
+  retain_until DATETIME NULL,
+  deleted_at DATETIME NULL,
+  physical_deleted_at DATETIME NULL,
   size_code VARCHAR(64) NOT NULL,
   background_color VARCHAR(32) NOT NULL,
   warnings JSON NOT NULL,
@@ -96,7 +105,10 @@ CREATE TABLE IF NOT EXISTS photo_tasks (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY idx_photo_tasks_user_created (user_id, created_at),
-  KEY idx_photo_tasks_task_id (task_id)
+  KEY idx_photo_tasks_task_id (task_id),
+  KEY idx_photo_tasks_user_deleted_created (user_id, deleted_at, created_at),
+  KEY idx_photo_tasks_deleted_physical (deleted_at, physical_deleted_at),
+  KEY idx_photo_tasks_retain_until (retain_until)
 );
 
 CREATE TABLE IF NOT EXISTS orders (

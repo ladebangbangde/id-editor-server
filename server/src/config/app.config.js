@@ -27,5 +27,11 @@ module.exports = {
   idEditorToolBaseUrl,
   idEditorToolTimeout: Number(process.env.ID_EDITOR_TOOL_TIMEOUT || 30000),
   idEditorToolPublicBaseUrl,
-  logLevel: process.env.LOG_LEVEL || 'info'
+  logLevel: process.env.LOG_LEVEL || 'info',
+
+  fileRetentionOriginalHours: Number(process.env.FILE_RETENTION_ORIGINAL_HOURS || 24),
+  fileRetentionResultHours: Number(process.env.FILE_RETENTION_RESULT_HOURS || 168),
+  softDeletePhysicalDeleteDelayMinutes: Number(process.env.SOFT_DELETE_PHYSICAL_DELETE_DELAY_MINUTES || 10),
+  cleanupCron: process.env.CLEANUP_CRON || '*/30 * * * *',
+  userPathHashLength: Number(process.env.USER_PATH_HASH_LENGTH || 20),
 };

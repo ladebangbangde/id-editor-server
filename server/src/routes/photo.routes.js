@@ -6,6 +6,7 @@ router.get('/specs', controller.specs);
 router.post('/process', upload.single('file'), controller.process);
 router.post('/tasks', upload.single('file'), controller.createTask);
 router.get('/history', controller.history);
+router.delete('/history/:imageId', controller.deleteHistory);
 router.get('/tasks/:taskId/status', controller.taskStatus);
 router.get('/tasks/:taskId/result', controller.taskResult);
 router.get('/tasks/:taskId', controller.taskDetail);

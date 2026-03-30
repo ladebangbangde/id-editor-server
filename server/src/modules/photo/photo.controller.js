@@ -67,6 +67,12 @@ module.exports = {
   }),
 
 
+  deleteHistory: asyncHandler(async (req, res) => {
+    const result = await photoService.deleteHistory(req.params.imageId, req);
+    return success(res, result, result.message || 'success');
+  }),
+
+
   taskStatus: asyncHandler(async (req, res) => {
     const result = await photoService.getTaskStatus(req.params.taskId, req.user.id);
     return success(res, result, 'success');

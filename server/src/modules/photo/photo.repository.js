@@ -43,9 +43,14 @@ module.exports = {
     });
   },
 
+  findByTaskIdAnyUser(taskId) {
+    return PhotoTask.findOne({ where: { task_id: taskId } });
+  },
+
   findHistoryByUserId(userId, { page, pageSize, statuses } = {}) {
     const where = {
       user_id: userId,
+      deleted_at: { [Op.is]: null },
       [Op.or]: [
         { size_code: { [Op.ne]: LEGACY_FORMAL_WEAR_SIZE_CODE } },
         { size_code: { [Op.is]: null } }
@@ -62,6 +67,15 @@ module.exports = {
       offset: (page - 1) * pageSize,
       limit: pageSize
     });
+  },
+
+  async softDeleteByTaskId(taskId, userId, now = new Date()) {
+    const record = await PhotoTask.findOne({ where: { task_id: taskId, user_id: userId } });
+    if (!record) return { found: false, deleted: false };
+    if (record.deleted_at) return { found: true, deleted: false, record };
+
+    await record.update({ deleted_at: now });
+    return { found: true, deleted: true, record };
   },
 
   LEGACY_FORMAL_WEAR_SIZE_CODE
