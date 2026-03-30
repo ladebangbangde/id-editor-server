@@ -3,12 +3,19 @@ const path = require('path');
 const appConfig = require('../config/app.config');
 const AppError = require('../utils/app-error');
 const { ALLOWED_EXTENSIONS, ALLOWED_MIME_TYPES, FOLDERS } = require('../constants/file');
-const { buildFileName, absoluteUploadPath, ensureUploadDirs } = require('../utils/file-helper');
+const { buildFileName, absoluteUploadPath, absoluteUserUploadPath, ensureDir, ensureUploadDirs } = require('../utils/file-helper');
 
 ensureUploadDirs();
 
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, absoluteUploadPath(FOLDERS.ORIGINAL, '')),
+  destination: (req, file, cb) => {
+    if (req?.user) {
+      const userScopedDir = absoluteUserUploadPath(req.user, FOLDERS.ORIGINAL);
+      ensureDir(userScopedDir);
+      return cb(null, userScopedDir);
+    }
+    return cb(null, absoluteUploadPath(FOLDERS.ORIGINAL, ''));
+  },
   filename: (req, file, cb) => cb(null, buildFileName(path.extname(file.originalname).toLowerCase()))
 });
 

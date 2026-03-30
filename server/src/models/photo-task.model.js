@@ -17,5 +17,11 @@ module.exports = sequelize.define('PhotoTask', {
   error_code: DataTypes.STRING(64),
   error_message: DataTypes.STRING(255),
   request_payload: { type: DataTypes.JSON, allowNull: false },
-  response_payload: DataTypes.JSON
+  response_payload: DataTypes.JSON,
+  deleted_at: DataTypes.DATE,
+  delete_requested_at: DataTypes.DATE,
+  physical_delete_after: DataTypes.DATE,
+  source_deleted_at: DataTypes.DATE,
+  preview_deleted_at: DataTypes.DATE,
+  result_deleted_at: DataTypes.DATE
 }, { tableName: 'photo_tasks', underscored: true, timestamps: true, createdAt: 'created_at', updatedAt: 'updated_at' });

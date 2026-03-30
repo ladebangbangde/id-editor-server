@@ -15,8 +15,16 @@ CREATE TABLE IF NOT EXISTS photo_tasks (
   error_message VARCHAR(255) NULL,
   request_payload JSON NOT NULL,
   response_payload JSON NULL,
+  deleted_at DATETIME NULL,
+  delete_requested_at DATETIME NULL,
+  physical_delete_after DATETIME NULL,
+  source_deleted_at DATETIME NULL,
+  preview_deleted_at DATETIME NULL,
+  result_deleted_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY idx_photo_tasks_user_created (user_id, created_at),
-  KEY idx_photo_tasks_task_id (task_id)
+  KEY idx_photo_tasks_task_id (task_id),
+  KEY idx_photo_tasks_soft_delete (deleted_at, physical_delete_after),
+  KEY idx_photo_tasks_retention (created_at, source_deleted_at, preview_deleted_at, result_deleted_at)
 );
