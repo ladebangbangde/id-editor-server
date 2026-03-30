@@ -2,10 +2,10 @@ ALTER TABLE photo_tasks
   MODIFY COLUMN source_url VARCHAR(255) NULL;
 
 ALTER TABLE photo_tasks
-  ADD COLUMN IF NOT EXISTS purged_at DATETIME NULL AFTER physical_deleted_at,
-  ADD COLUMN IF NOT EXISTS cleanup_status VARCHAR(32) NOT NULL DEFAULT 'pending' AFTER purged_at,
-  ADD COLUMN IF NOT EXISTS cleanup_error VARCHAR(1000) NULL AFTER cleanup_status,
-  ADD COLUMN IF NOT EXISTS file_expire_at DATETIME NULL AFTER cleanup_error;
+  ADD COLUMN  purged_at DATETIME NULL AFTER physical_deleted_at,
+  ADD COLUMN  cleanup_status VARCHAR(32) NOT NULL DEFAULT 'pending' AFTER purged_at,
+  ADD COLUMN  cleanup_error VARCHAR(1000) NULL AFTER cleanup_status,
+  ADD COLUMN  file_expire_at DATETIME NULL AFTER cleanup_error;
 
 UPDATE photo_tasks
 SET cleanup_status = 'pending'
