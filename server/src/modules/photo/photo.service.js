@@ -16,8 +16,9 @@ const {
 } = require('../../integrations/id-editor-tool/id-editor-tool.mapper');
 const photoRepository = require('./photo.repository');
 const { getPhotoSpecs, mergeSpecs, validateProcessPhotoPayload, normalizeSizeCode } = require('./dto/process-photo.dto');
-const { toToolSharedAbsolutePath } = require('../../utils/file-helper');
+const { toToolSharedAbsolutePath, resolveUploadRelativePathFromAbsolute } = require('../../utils/file-helper');
 const photoTaskRuntimeService = require('./photo-task-runtime.service');
+const storageService = require('../../services/storage/storage.service');
 
 function buildAbsoluteUrl(urlPath) {
   if (!urlPath) return null;
@@ -492,7 +493,7 @@ module.exports = {
     const selectedSizeDefinition = validation.resolvedSize?.definition
       || mergedSpecs.sizeDefinitions.find((item) => item.sizeCode === requestPayload.sizeCode)
       || null;
-    const sourceUrl = buildAbsoluteUrl(`/uploads/original/${path.basename(file.path)}`);
+    const sourceUrl = buildAbsoluteUrl(resolveUploadRelativePathFromAbsolute(file.path) || `/uploads/original/${path.basename(file.path)}`);
     const toolFilePath = buildToolFilePath(file.path);
 
     logger.info('photo source file saved', {
@@ -874,6 +875,74 @@ module.exports = {
 
     const specs = await loadRuntimeSpecs();
     return buildPhotoTaskView(task, specs).editDraft;
+  },
+
+  async deleteTaskHistory(taskId, userId) {
+    const now = new Date();
+    const physicalDeleteAfter = new Date(now.getTime() + appConfig.softDeletePhysicalDeleteDelayMinutes * 60 * 1000);
+    const task = await photoRepository.softDeleteByTaskId(taskId, userId, {
+      deleted_at: now,
+      delete_requested_at: now,
+      physical_delete_after: physicalDeleteAfter
+    });
+
+    if (!task) {
+      throw new AppError('任务不存在', 404, null, 404);
+    }
+
+    return {
+      taskId: task.task_id,
+      deleted: true,
+      softDeletedAt: task.deleted_at || now,
+      physicalDeleteAfter: task.physical_delete_after || physicalDeleteAfter
+    };
+  },
+
+  async cleanupExpiredFiles() {
+    const now = new Date();
+    const originalRetentionMs = appConfig.fileRetentionOriginalHours * 60 * 60 * 1000;
+    const resultRetentionMs = appConfig.fileRetentionResultHours * 60 * 60 * 1000;
+    const tasks = await photoRepository.findCleanupCandidates(now, 200);
+
+    const summary = { scanned: tasks.length, updated: 0, deletedFiles: 0 };
+
+    for (const task of tasks) {
+      const shouldDeleteBySoftDelete = Boolean(task.deleted_at && task.physical_delete_after && task.physical_delete_after <= now);
+      const sourceExpired = now.getTime() - new Date(task.created_at).getTime() >= originalRetentionMs;
+      const resultExpired = now.getTime() - new Date(task.created_at).getTime() >= resultRetentionMs;
+      const updatePayload = {};
+
+      if (task.source_url && !task.source_deleted_at && (shouldDeleteBySoftDelete || sourceExpired)) {
+        const result = storageService.deleteByUrl(task.source_url);
+        if (result.deleted || result.reason === 'file-not-found' || result.reason === 'not-local-upload-url') {
+          updatePayload.source_deleted_at = now;
+          summary.deletedFiles += Number(result.deleted);
+        }
+      }
+
+      if (task.preview_url && !task.preview_deleted_at && (shouldDeleteBySoftDelete || resultExpired)) {
+        const result = storageService.deleteByUrl(task.preview_url);
+        if (result.deleted || result.reason === 'file-not-found' || result.reason === 'not-local-upload-url') {
+          updatePayload.preview_deleted_at = now;
+          summary.deletedFiles += Number(result.deleted);
+        }
+      }
+
+      if (task.result_url && !task.result_deleted_at && (shouldDeleteBySoftDelete || resultExpired)) {
+        const result = storageService.deleteByUrl(task.result_url);
+        if (result.deleted || result.reason === 'file-not-found' || result.reason === 'not-local-upload-url') {
+          updatePayload.result_deleted_at = now;
+          summary.deletedFiles += Number(result.deleted);
+        }
+      }
+
+      if (Object.keys(updatePayload).length > 0) {
+        await photoRepository.updateById(task.id, updatePayload);
+        summary.updated += 1;
+      }
+    }
+
+    return summary;
   },
 
   async assertUserCanProcess(user) {

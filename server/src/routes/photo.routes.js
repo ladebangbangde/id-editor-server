@@ -10,5 +10,6 @@ router.get('/tasks/:taskId/status', controller.taskStatus);
 router.get('/tasks/:taskId/result', controller.taskResult);
 router.get('/tasks/:taskId', controller.taskDetail);
 router.get('/tasks/:taskId/edit-draft', controller.editDraft);
+router.delete('/tasks/:taskId', controller.deleteHistory);
 
 module.exports = router;

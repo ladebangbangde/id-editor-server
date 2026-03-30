@@ -98,5 +98,10 @@ module.exports = {
   editDraft: asyncHandler(async (req, res) => {
     const result = await photoService.getTaskEditDraft(req.params.taskId, req.user.id);
     return success(res, result, 'success');
+  }),
+
+  deleteHistory: asyncHandler(async (req, res) => {
+    const result = await photoService.deleteTaskHistory(req.params.taskId, req.user.id);
+    return success(res, result, 'success');
   })
 };
